@@ -1,158 +1,107 @@
-# Mock API Server - User Guide
+# Mock Server - User Guide
 
-Welcome to the Mock API Server! This tool allows you to create, configure, and test mock API endpoints directly in your browser. It's perfect for frontend development when the backend isn't ready, or for creating stable test environments.
+Welcome! This tool allows you to create a powerful mock API server for your development and testing needs. The system is split into two parts: a web-based **Configuration Editor** and a standalone **Node.js Server**.
+
+This decoupled architecture provides the best of both worlds: a rich, user-friendly interface for building your mock APIs, and a lightweight, high-performance server that can be integrated into any development workflow and used by any HTTP client.
 
 ## Table of Contents
-1.  [Interface Overview](#interface-overview)
-2.  [Core Concepts](#core-concepts)
-    -   [What is a Mock?](#what-is-a-mock)
+1.  [Core Architecture](#1-core-architecture)
+2.  [The 5-Step Workflow](#2-the-5-step-workflow)
+3.  [The Configuration Editor UI](#3-the-configuration-editor-ui)
+    -   [Creating a New Mock](#creating-a-new-mock)
     -   [Request Matching](#request-matching)
     -   [Mock Responses](#mock-responses)
-3.  [How-To Guides](#how-to-guides)
-    -   [Create a New Mock](#create-a-new-mock)
-    -   [Edit or Delete a Mock](#edit-or-delete-a-mock)
-    -   [Persisting Mocks (Import/Export)](#persisting-mocks-importexport)
-    -   [Simulate an API Request](#simulate-an-api-request)
-    -   [Inspect Logs](#inspect-logs)
-    -   [Debug a Mismatched Request](#debug-a-mismatched-request)
-4.  [Matching Logic Details](#matching-logic-details)
+    -   [Importing and Exporting](#importing-and-exporting)
+4.  [Running the Mock Server](#4-running-the-mock-server)
+    -   [Example with `curl`](#example-with-curl)
+    -   [Debugging a Mismatched Request](#debugging-a-mismatched-request)
+5.  [Advanced Matching Details](#5-advanced-matching-details)
     -   [Path Matching](#path-matching)
-    -   [Regular Expression Matching](#regular-expression-matching-headers-query-params-body)
-    -   [Empty Fields](#empty-fields)
+    -   [Regular Expressions](#regular-expressions)
 
 ---
 
-## 1. Interface Overview
+## 1. Core Architecture
 
-The application is divided into three main panels:
+-   **Mock Configuration Editor (Web UI):** The web page is your control panel. You use it to define all your mock endpoints, including their request matchers and desired responses. When you're done, you **export** this configuration to a `mocks-config.json` file. The UI itself does not run the server.
 
-1.  **Configured Mocks (Left):** This panel lists all the mock endpoints you've created. You can add, edit, delete, import, and export mocks from here.
-2.  **API Simulator (Middle):** This is your testing ground. Construct and send HTTP requests to see how they match against your configured mocks and what response is returned.
-3.  **Request Log (Right):** A real-time log of all requests sent from the API Simulator. It shows which mock was matched (if any) and the resulting status code.
+-   **Mock Server (`server.js`):** This is a standalone Node.js script. You run it from your command line. It automatically finds, loads, and serves your mocks from the `mocks-config.json` file. It's a true HTTP server that can be hit by any tool or application, including `curl`, Postman, or your own frontend projects.
 
 ---
 
-## 2. Core Concepts
+## 2. The 5-Step Workflow
 
-### What is a Mock?
+This is the standard process for using the tool.
 
-A "mock" is a single rule that defines how the server should respond to a specific kind of request. It consists of two parts:
--   **Request Matcher:** A set of criteria to identify an incoming request (e.g., `GET /api/users/1`).
--   **Mock Response:** The predefined response to send back if a request meets the criteria (e.g., a `200 OK` status with a JSON body).
+1.  **Configure:** Open the web UI and create/edit your desired mock API rules.
+2.  **Export:** Click the "Export" button in the UI to download your configuration as a `mocks-config.json` file.
+3.  **Locate:** Move the downloaded `mocks-config.json` into the same directory as the `server.js` script.
+4.  **Run:** Open your terminal, navigate to that directory, and start the server with the command:
+    ```bash
+    node server.js
+    ```
+5.  **Connect:** The server will now be running at `http://localhost:4000`. Point your applications to this address. Any changes you make in the UI will require you to export and restart the server.
+
+---
+
+## 3. The Configuration Editor UI
+
+### Creating a New Mock
+1.  Click the **"New"** button to open the form.
+2.  Give your mock a descriptive **Name** (e.g., "Get User Success").
+3.  Fill out the **Request Matcher** section to define what kind of incoming request this mock should apply to.
+4.  Fill out the **Mock Response** section to define the response the server should send back.
+5.  Click **"Save Mock"**.
 
 ### Request Matching
-
-When you send a request from the simulator, it's checked against your list of mocks from top to bottom. The **first mock** that satisfies all of its matcher conditions will be used. A request must match **all** of a mock's defined criteria:
-
--   **HTTP Method:** The method must be an exact match (e.g., `GET`, `POST`).
--   **Path:** The request path must match the defined pattern. The matcher supports wildcards for powerful matching.
-    -   Use `:param` or `*` to match a single URL segment (e.g., `/users/*` matches `/users/123`).
-    -   Use `**` to match multiple URL segments (e.g., `/assets/**` matches `/assets/img/logo.png`).
--   **Query Params & Headers:** If defined, the request must contain all of them. The value field supports **regular expressions** for advanced matching. If the value isn't a valid regex, it falls back to a simple substring check.
--   **Body Contains:** If provided, this field also supports **regular expressions** against the entire request body. It falls back to a substring check if the pattern is not a valid regex.
+For a request to be matched, it must satisfy **all** criteria defined in the matcher:
+-   **Method & Path:** The HTTP method and URL path (e.g., `GET` `/users/:id`).
+-   **Query Params & Headers:** If you add any, the request must contain them. The `value` field supports regular expressions.
+-   **Body Contains:** If filled, the request body must contain this text. This also supports regular expressions.
 
 ### Mock Responses
+When a request is matched, the server sends this predefined response:
+-   **Status:** The HTTP status code (e.g., `200`, `404`).
+-   **Headers:** Any custom HTTP headers for the response.
+-   **Body:** The response payload. Remember to use valid JSON if that's what your client expects.
+-   **Delay:** An optional delay in milliseconds to simulate network latency.
 
-When a request is successfully matched, the server generates the defined response:
-
--   **Status:** The HTTP status code to return (e.g., `200`, `404`, `500`).
--   **Headers:** Any custom response headers you want to include.
--   **Body:** The content of the response body. For JSON, ensure it's valid JSON.
--   **Delay:** An optional delay in milliseconds (ms) to simulate network latency.
-
----
-
-## 3. How-To Guides
-
-### Create a New Mock
-
-1.  In the **Configured Mocks** panel, click the **"New"** button.
-2.  A modal window will appear. Fill in the details:
-    -   **Mock Name:** A descriptive name, like "Get User Success" or "Create User Validation Error".
-    -   **Request Matcher (Left side):**
-        -   Select the **HTTP Method** and enter the **Path**.
-        -   Click "Add Query Param" or "Add Header" to add key-value pairs for matching.
-        -   Enter text in the **Body Contains** field if you want to match against the request payload.
-    -   **Mock Response (Right side):**
-        -   Set the **Status** code and optional **Delay**.
-        -   Add any **Headers** you want the response to have.
-        -   Fill in the **Body** with the content you want to return.
-3.  Click **"Save Mock"**. Your new mock will appear at the top of the list.
-
-### Edit or Delete a Mock
-
--   **To Edit:** Hover over a mock in the list and click the **pencil icon**. The same form will appear, pre-filled with the mock's data. Make your changes and click "Save Mock".
--   **To Delete:** Hover over a mock and click the **trash can icon**.
-
-### Persisting Mocks (Import/Export)
-
-You can save your entire mock configuration to a file or load a configuration from a file.
-
--   **Export Mocks:**
-    1.  In the **Configured Mocks** panel, click the **"Export"** button.
-    2.  This will download a `mocks-config.json` file to your computer. This file contains all of your current mocks.
-
--   **Import Mocks:**
-    1.  In the **Configured Mocks** panel, click the **"Import"** button.
-    2.  Select a `.json` file that you previously exported.
-    3.  A confirmation dialog will appear, warning you that this will overwrite your current setup.
-    4.  Click "OK" to proceed. Your mocks will be replaced with the content from the file.
-
-### Simulate an API Request
-
-1.  Go to the **API Simulator** panel.
-2.  Select the **HTTP Method** from the dropdown.
-3.  Enter the full request **path**, including any query parameters (e.g., `/api/users?page=2`).
-4.  Add any **Headers** or a request **Body** as needed.
-5.  Click **"Send Request"**.
-6.  The response status and body will appear in the "Response" section below.
-
-### Inspect Logs
-
-1.  After sending a request, a new entry will appear at the top of the **Request Log** panel.
-2.  Each entry shows the status, method, path, and time.
-3.  Click on any log entry to expand it. The detailed view shows:
-    -   **Matched Mock:** The name of the mock that was matched.
-    -   **Request Body:** The body of the request you sent.
-    -   **Response Body:** The body of the response you received.
-
-### Debug a Mismatched Request
-
-If you send a request and it doesn't match any of your configured mocks, you will receive a `404 Not Found` response.
-
-1.  Check the **Request Log**. The entry will have a `404` status.
-2.  Expand the log entry and look at the **Response Body**.
-3.  The body will contain a detailed JSON object showing the exact request the server received (method, URL, headers, and body).
-4.  Compare this "actual" request data with your mock's "expected" matcher configuration to find the discrepancy. Common issues include a misspelled path, a missing header, or incorrect query parameter.
+### Importing and Exporting
+-   **Export:** The most important button! It generates the `mocks-config.json` file needed by the server.
+-   **Import:** Loads a `mocks-config.json` file into the UI, allowing you to continue editing a previous session or a shared configuration. This will overwrite your current unsaved configuration.
 
 ---
 
-## 4. Matching Logic Details
+## 4. Running the Mock Server
+
+Once `server.js` is running, it will print messages to your console for every request it receives, telling you whether it was matched to a mock or not.
+
+### Example with `curl`
+If you have a mock for `GET /users/1` and your server is running:
+```bash
+# This command will hit your local mock server
+curl -v http://localhost:4000/users/1
+
+# You will see the mock response in your terminal, and a "Matched" log
+# will appear in the terminal where server.js is running.
+```
+
+### Debugging a Mismatched Request
+If you send a request and it doesn't match any mock, the server will return a `404 Not Found` response.
+-   **Check the server console:** The log will show `[404] ... No Match`.
+-   **Check the `curl` response:** The response body from the 404 will be a JSON object detailing the exact request the server received (path, headers, body).
+-   Compare this "actual" request data with your mock's matcher configuration in the UI to find the difference.
+
+---
+
+## 5. Advanced Matching Details
 
 ### Path Matching
+-   **Exact:** `/api/users` matches only `/api/users`.
+-   **Parameter (single segment):** `/users/:id` or `/users/*` will match `/users/123` but NOT `/users/123/profile`.
+-   **Wildcard (multi-segment):** `/assets/**` matches `/assets/logo.png` and `/assets/img/icons/user.svg`.
 
-The path matcher offers several ways to define dynamic paths:
+### Regular Expressions
+The `value` field for **Headers**, **Query Params**, and the **Body Contains** field all support full regular expressions. If the text you enter is not a valid regex, the system will fall back to a simple "contains substring" check.
 
--   **Exact Match:** `/api/users` will only match `/api/users`.
--   **Path Parameters (Single Segment):** Both `/api/users/:id` and `/api/users/*` will match `/api/users/123` and `/api/users/any-string`, but will **not** match `/api/users/123/profile`.
--   **Wildcard (Multiple Segments):** `/assets/**` will match `/assets/logo.png`, `/assets/img/icons/user.svg`, and anything else under the `/assets/` path.
-
-### Regular Expression Matching (Headers, Query Params, Body)
-
-The `value` fields for Headers, Query Params, and the `Body Contains` field all support full regular expressions for powerful matching. The matcher will first try to interpret the input as a regex. If it's not a valid regex, it will fall back to a simple "contains" (substring) check.
-
--   **Header Example:**
-    -   **Matcher Header:** `Authorization` | `^Bearer\s[\w.-]+$`
-    -   **Will Match Request Header:** `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
-    -   **Will Not Match:** `Authorization: Basic dXNlcjpwYXNz`
-
--   **Body Example:**
-    -   **Matcher Body Contains:** `"userId":\s*\d+`
-    -   **Will Match Request Body:** `{ "transactionId": "abc", "userId": 12345 }`
-    -   **Will Not Match:** `{ "transactionId": "abc", "user": "guest" }`
-
--   **Fallback Behavior:** If you enter `[invalid-regex` in a value field, the matcher will simply check if the request value contains the literal string `"[invalid-regex"`.
-
-### Empty Fields
-
-Any empty key-value pairs for headers or query params in a mock's configuration are ignored during matching.
+-   **Example:** To match an `Authorization` header for any JWT Bearer token, you could use the regex: `^Bearer\s[\w.-]+$`

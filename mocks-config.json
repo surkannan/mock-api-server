@@ -1,0 +1,19 @@
+[
+  {
+    "id": "1755600330805",
+    "name": "",
+    "matcher": {
+      "method": "GET",
+      "path": "/",
+      "headers": [],
+      "queryParams": [],
+      "body": ""
+    },
+    "response": {
+      "status": 200,
+      "headers": [],
+      "body": "",
+      "delay": 0
+    }
+  }
+]

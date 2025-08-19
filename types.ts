@@ -1,4 +1,5 @@
 
+
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS' | 'HEAD';
 
 export interface KeyValue {
@@ -42,7 +43,7 @@ export interface LiveRequest {
 export interface LogEntry {
   id: string;
   request: LiveRequest;
-  matchedMock?: Mock;
+  matchedMock?: Mock | null;
   actualResponse: {
     status: number;
     body?: string;

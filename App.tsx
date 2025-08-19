@@ -1,17 +1,18 @@
-import React, { useState, useCallback } from 'react';
-import { Mock, LiveRequest, MockResponse, LogEntry } from './types';
+import React, { useState } from 'react';
+import { Mock } from './types';
 import MockList from './components/MockList';
-import ApiSimulator from './components/ApiSimulator';
-import RequestLog from './components/RequestLog';
 import MockFormModal from './components/MockFormModal';
-import { findMatchingMock } from './services/matcher';
 
 const App: React.FC = () => {
   const [mocks, setMocks] = useState<Mock[]>([]);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [editingMock, setEditingMock] = useState<Mock | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  const updateMocks = (newMocks: Mock[]) => {
+      const sortedMocks = newMocks.sort((a, b) => parseInt(b.id) - parseInt(a.id));
+      setMocks(sortedMocks);
+  };
+  
   const handleAddMock = () => {
     setEditingMock(null);
     setIsModalOpen(true);
@@ -23,22 +24,19 @@ const App: React.FC = () => {
   };
 
   const handleDeleteMock = (id: string) => {
-    setMocks(mocks.filter(m => m.id !== id));
+    updateMocks(mocks.filter(m => m.id !== id));
   };
 
   const handleSaveMock = (mock: Mock) => {
     const index = mocks.findIndex(m => m.id === mock.id);
+    let newMocks;
     if (index > -1) {
-      const newMocks = [...mocks];
+      newMocks = [...mocks];
       newMocks[index] = mock;
-      setMocks(newMocks);
     } else {
-      setMocks([mock, ...mocks]);
+      newMocks = [mock, ...mocks];
     }
-  };
-  
-  const handleClearLogs = () => {
-    setLogs([]);
+    updateMocks(newMocks);
   };
 
   const handleExportMocks = () => {
@@ -60,95 +58,34 @@ const App: React.FC = () => {
 
   const handleImportMocks = (importedMocks: Mock[]) => {
     if (window.confirm('This will replace your current mock configuration. Are you sure?')) {
-      setMocks(importedMocks);
+      updateMocks(importedMocks);
     }
   };
 
-  const handleSimulatedRequest = useCallback(async (request: LiveRequest): Promise<MockResponse> => {
-    const matchedMock = findMatchingMock(request, mocks);
-
-    if (matchedMock) {
-        const logEntry: LogEntry = {
-            id: Date.now().toString(),
-            request,
-            matchedMock,
-            actualResponse: {
-                status: matchedMock.response.status,
-                body: matchedMock.response.body,
-            },
-        };
-        await new Promise(resolve => setTimeout(resolve, matchedMock.response.delay));
-        setLogs(prev => [logEntry, ...prev]);
-        return matchedMock.response;
-    } 
-    
-    // No match
-    const query = request.queryParams.length > 0 
-        ? '?' + new URLSearchParams(request.queryParams.map(p => [p.key, p.value])).toString()
-        : '';
-    const fullUrl = `${request.path}${query}`;
-
-    const headersObject = request.headers.reduce((acc, header) => {
-        acc[header.key] = header.value;
-        return acc;
-    }, {} as Record<string, string>);
-
-    const errorBody = {
-        error: "No mock match found for the following request:",
-        request: {
-            method: request.method,
-            url: fullUrl,
-            headers: headersObject,
-            body: request.body || null,
-        }
-    };
-    const errorBodyString = JSON.stringify(errorBody, null, 2);
-    
-    const noMatchResponse: MockResponse = {
-        status: 404,
-        body: errorBodyString,
-        delay: 0,
-        headers: [{ id: 'content-type-json', key: 'Content-Type', value: 'application/json' }]
-    };
-    
-    const logEntry: LogEntry = {
-        id: Date.now().toString(),
-        request,
-        matchedMock: undefined,
-        actualResponse: {
-            status: noMatchResponse.status,
-            body: noMatchResponse.body,
-        },
-    };
-
-    setLogs(prev => [logEntry, ...prev]);
-
-    return noMatchResponse;
-  }, [mocks]);
-
   return (
-    <div className="h-screen w-screen p-4 bg-gray-900 text-gray-100">
-      <header className="mb-4">
-        <h1 className="text-3xl font-bold text-center">Mock API Server</h1>
-        <p className="text-center text-gray-400">Configure mock endpoints and test them with the API simulator.</p>
+    <div className="min-h-screen w-screen p-4 bg-gray-900 text-gray-100 flex flex-col items-center">
+      <header className="mb-6 text-center w-full max-w-4xl">
+        <h1 className="text-3xl font-bold">Mock Configuration Editor</h1>
+        <div className="text-left bg-gray-800 p-4 rounded-lg mt-4 border border-blue-500/30">
+            <h2 className="font-semibold text-lg text-blue-300 mb-2">How to Use</h2>
+            <ol className="list-decimal list-inside text-gray-300 space-y-2 text-sm">
+                <li>Use this UI to create and manage your mock API definitions.</li>
+                <li>Click the <strong className="font-semibold text-gray-100">Export</strong> button to download a <code className="bg-gray-700 px-1 rounded">mocks-config.json</code> file.</li>
+                <li>Place the downloaded file in the same directory as the <code className="bg-gray-700 px-1 rounded">server.js</code> file.</li>
+                <li>From your terminal, run the mock server: <code className="bg-gray-900 border border-gray-600 text-green-400 px-2 py-1 rounded-md block mt-1">node server.js</code></li>
+                <li>Point your applications to <code className="bg-gray-700 px-1 rounded">http://localhost:4000</code>.</li>
+            </ol>
+        </div>
       </header>
-      <main className="grid grid-cols-1 lg:grid-cols-3 gap-4" style={{ height: 'calc(100vh - 8rem)' }}>
-        <div className="lg:col-span-1">
-          <MockList
-            mocks={mocks}
-            onAdd={handleAddMock}
-            onEdit={handleEditMock}
-            onDelete={handleDeleteMock}
-            onImport={handleImportMocks}
-            onExport={handleExportMocks}
-          />
-        </div>
-        <div className="lg:col-span-1">
-          <ApiSimulator onSendRequest={handleSimulatedRequest} />
-        </div>
-        <div className="lg:col-span-1">
-          <RequestLog logs={logs} clearLogs={handleClearLogs} />
-        </div>
+      <main className="w-full max-w-4xl flex-grow">
+        <MockList
+          mocks={mocks}
+          onAdd={handleAddMock}
+          onEdit={handleEditMock}
+          onDelete={handleDeleteMock}
+          onImport={handleImportMocks}
+          onExport={handleExportMocks}
+        />
       </main>
       <MockFormModal
         isOpen={isModalOpen}

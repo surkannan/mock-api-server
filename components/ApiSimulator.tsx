@@ -1,12 +1,7 @@
-
 import React, { useState } from 'react';
-import { HttpMethod, KeyValue, LiveRequest, MockResponse } from '../types';
+import { HttpMethod, KeyValue, MockResponse } from '../types';
 import TrashIcon from './icons/TrashIcon';
 import PlusIcon from './icons/PlusIcon';
-
-interface ApiSimulatorProps {
-  onSendRequest: (request: LiveRequest) => Promise<MockResponse | null>;
-}
 
 const KeyValueInput: React.FC<{
   items: KeyValue[];
@@ -38,9 +33,9 @@ const KeyValueInput: React.FC<{
   );
 };
 
-const ApiSimulator: React.FC<ApiSimulatorProps> = ({ onSendRequest }) => {
+const ApiSimulator: React.FC = () => {
   const [method, setMethod] = useState<HttpMethod>('GET');
-  const [path, setPath] = useState<string>('/api/users');
+  const [path, setPath] = useState<string>('/users/1');
   const [headers, setHeaders] = useState<KeyValue[]>([]);
   const [body, setBody] = useState<string>('');
   const [response, setResponse] = useState<MockResponse | null>(null);
@@ -52,42 +47,53 @@ const ApiSimulator: React.FC<ApiSimulatorProps> = ({ onSendRequest }) => {
     if (status >= 200) return 'text-green-400';
     return 'text-gray-400';
   };
-
-  const parseQueryParams = (fullPath: string) => {
-    const url = new URL(fullPath, 'http://localhost');
-    const params: KeyValue[] = [];
-    url.searchParams.forEach((value, key) => {
-      params.push({ id: `${key}-${value}`, key, value });
-    });
-    return params;
-  };
   
   const handleSend = async () => {
     setIsLoading(true);
     setResponse(null);
-    const [requestPath] = path.split('?');
-    const queryParams = parseQueryParams(path);
 
-    const liveRequest: LiveRequest = {
-      id: Date.now().toString(),
-      timestamp: new Date(),
-      method,
-      path: requestPath,
-      headers: headers.filter(h => h.key),
-      queryParams,
-      body,
-    };
+    const fullPath = path.startsWith('/') ? path : `/${path}`;
+    const url = new URL(fullPath, window.location.origin);
+    
+    const requestHeaders = new Headers();
+    headers.filter(h => h.key).forEach(h => requestHeaders.append(h.key, h.value));
 
-    const res = await onSendRequest(liveRequest);
-    setResponse(res);
-    setIsLoading(false);
+    try {
+        const fetchResponse = await fetch(url.toString(), {
+            method,
+            headers: requestHeaders,
+            body: (method !== 'GET' && method !== 'HEAD' && body) ? body : undefined,
+        });
+
+        const responseBody = await fetchResponse.text();
+        const responseHeadersResult: KeyValue[] = [];
+        fetchResponse.headers.forEach((value, key) => {
+            responseHeadersResult.push({ id: key, key, value });
+        });
+
+        setResponse({
+            status: fetchResponse.status,
+            body: responseBody,
+            headers: responseHeadersResult,
+            delay: 0,
+        });
+    } catch (error) {
+        console.error("API Simulator fetch error:", error);
+        setResponse({
+            status: 503,
+            body: `Fetch failed. Is the mock server active?\n\n${(error as Error).message}`,
+            headers: [],
+            delay: 0,
+        });
+    } finally {
+        setIsLoading(false);
+    }
   };
 
   return (
     <div className="bg-gray-800 rounded-lg shadow-lg flex flex-col h-full">
       <h2 className="text-xl font-bold p-4 border-b border-gray-700">API Simulator</h2>
       <div className="flex-grow p-4 space-y-4 overflow-y-auto">
-        {/* Request */}
         <div>
           <h3 className="text-lg font-semibold mb-2">Request</h3>
           <div className="flex items-center space-x-2 bg-gray-700/50 p-2 rounded-md">
@@ -106,8 +112,7 @@ const ApiSimulator: React.FC<ApiSimulatorProps> = ({ onSendRequest }) => {
           </div>
         </div>
 
-        {/* Response */}
-        <div className="flex-grow">
+        <div>
           <h3 className="text-lg font-semibold mb-2">Response</h3>
           <div className="bg-gray-700/50 rounded-md min-h-[200px] p-4 flex flex-col">
             {isLoading ? (
