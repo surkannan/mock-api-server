@@ -21,6 +21,43 @@ const configPath = providedConfigPath || defaultConfigPath;
 
 let currentMocks = [];
 
+// --- Logging setup (console + file) ---
+const LOG_PATH = process.env.LOG_FILE || path.join(__dirname, 'server.log');
+const MAX_LOG_BYTES = parseInt(process.env.LOG_MAX_BYTES || '0', 10); // 0 disables rotation
+const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
+const LOG_LEVEL_STR = (process.env.LOG_LEVEL || 'info').toLowerCase();
+const LEVEL_THRESHOLD = LEVELS[LOG_LEVEL_STR] || 20;
+
+let logStream = null;
+let logBytesWritten = 0;
+try {
+  if (fs.existsSync(LOG_PATH)) {
+    try { logBytesWritten = fs.statSync(LOG_PATH).size; } catch {}
+  }
+  logStream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
+} catch (e) {
+  console.error('[WARN] Could not open log file for writing:', e.message);
+}
+
+const rotateLogsIfNeeded = (nextBytes) => {
+  if (!MAX_LOG_BYTES || MAX_LOG_BYTES <= 0) return;
+  if ((logBytesWritten + nextBytes) <= MAX_LOG_BYTES) return;
+  try {
+    if (logStream) {
+      logStream.end();
+    }
+    const bak = LOG_PATH + '.1';
+    try { if (fs.existsSync(bak)) fs.unlinkSync(bak); } catch {}
+    try { if (fs.existsSync(LOG_PATH)) fs.renameSync(LOG_PATH, bak); } catch {}
+  } catch {}
+  try {
+    logStream = fs.createWriteStream(LOG_PATH, { flags: 'a' });
+    logBytesWritten = 0;
+  } catch (e) {
+    console.error('[WARN] Failed to reopen log file after rotation:', e.message);
+  }
+};
+
 const loadMocksFromFile = () => {
   try {
     if (configPath && fs.existsSync(configPath)) {
@@ -112,6 +149,39 @@ const findMatchingMock = (request, mocks) => {
 
 loadMocksFromFile();
 
+// In-memory logs buffer and SSE clients
+const MAX_LOGS_BUFFER = parseInt(process.env.LOG_BUFFER_SIZE || '1000', 10);
+const logsBuffer = [];
+const sseClients = new Set();
+
+// Structured logging helpers
+const hrtimeMs = (startHr) => Number(process.hrtime.bigint() - startHr) / 1e6;
+const jlog = (level, event, data = {}) => {
+  const payload = { ts: new Date().toISOString(), level, event, ...data };
+  const lvl = LEVELS[(level || 'info').toLowerCase()] || 20;
+  if (lvl < LEVEL_THRESHOLD) return;
+  try {
+    if (level === 'error') console.error(JSON.stringify(payload));
+    else console.log(JSON.stringify(payload));
+    if (logStream) {
+      const line = JSON.stringify(payload) + '\n';
+      // rotate if needed before writing
+      rotateLogsIfNeeded(Buffer.byteLength(line));
+      logStream.write(line);
+      logBytesWritten += Buffer.byteLength(line);
+    }
+  } catch {
+    console.log(`[${level}] ${event}`, data);
+  }
+  // buffer and broadcast
+  try {
+    logsBuffer.push(payload);
+    if (logsBuffer.length > MAX_LOGS_BUFFER) logsBuffer.shift();
+    const line = 'data: ' + JSON.stringify(payload) + '\n\n';
+    sseClients.forEach((res) => { try { res.write(line); } catch {} });
+  } catch {}
+};
+
 const setCors = (res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
@@ -119,7 +189,9 @@ const setCors = (res) => {
 };
 
 const server = http.createServer((req, res) => {
+  const startHr = process.hrtime.bigint();
   const url = new URL(req.url, `http://${req.headers.host}`);
+  const clientIp = req.socket && req.socket.remoteAddress ? req.socket.remoteAddress : undefined;
 
   // CORS preflight
   if (req.method === 'OPTIONS') {
@@ -137,17 +209,20 @@ const server = http.createServer((req, res) => {
 
   // Admin endpoints
   if (url.pathname === '/__health' && req.method === 'GET') {
-    return sendJson(200, {
+    const body = {
       ok: true,
       port: PORT,
       configPath,
       hasConfigFile: fs.existsSync(configPath),
       mocksCount: currentMocks.length,
-    });
+    };
+    jlog('info', 'admin.health', { clientIp });
+    return sendJson(200, body);
   }
 
   if (url.pathname === '/__mocks') {
     if (req.method === 'GET') {
+      jlog('info', 'admin.get_mocks', { clientIp, count: currentMocks.length });
       return sendJson(200, currentMocks);
     }
     if (req.method === 'PUT') {
@@ -163,8 +238,10 @@ const server = http.createServer((req, res) => {
           const persist = (url.searchParams.get('persist') || 'false') === 'true';
           let persisted = false;
           if (persist) persisted = persistMocksToFile();
+          jlog('info', 'admin.put_mocks', { clientIp, count: currentMocks.length, persisted });
           return sendJson(200, { ok: true, count: currentMocks.length, persisted });
         } catch (e) {
+          jlog('error', 'admin.put_mocks_error', { clientIp, message: e.message });
           return sendJson(400, { ok: false, error: 'Invalid JSON body', message: e.message });
         }
       });
@@ -174,7 +251,49 @@ const server = http.createServer((req, res) => {
 
   if (url.pathname === '/__reload' && req.method === 'POST') {
     loadMocksFromFile();
+    jlog('info', 'admin.reload', { clientIp, count: currentMocks.length });
     return sendJson(200, { ok: true, count: currentMocks.length });
+  }
+
+  // Logs endpoints
+  if (url.pathname === '/__logs' && req.method === 'GET') {
+    const limit = Math.max(0, parseInt(url.searchParams.get('limit') || '500', 10));
+    const format = (url.searchParams.get('format') || 'ndjson').toLowerCase();
+    const start = Math.max(logsBuffer.length - limit, 0);
+    const slice = logsBuffer.slice(start);
+    if (format === 'json') {
+      // Pretty JSON array
+      setCors(res);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(slice, null, 2));
+    } else {
+      // NDJSON
+      setCors(res);
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end(slice.map((e) => JSON.stringify(e)).join('\n'));
+    }
+    jlog('info', 'admin.logs_dump', { clientIp, limit, format });
+    return;
+  }
+
+  if (url.pathname === '/__logs/stream' && req.method === 'GET') {
+    setCors(res);
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    const replay = Math.max(0, parseInt(url.searchParams.get('replay') || '100', 10));
+    const start = Math.max(logsBuffer.length - replay, 0);
+    logsBuffer.slice(start).forEach((payload) => {
+      res.write('data: ' + JSON.stringify(payload) + '\n\n');
+    });
+    sseClients.add(res);
+    req.on('close', () => {
+      sseClients.delete(res);
+    });
+    jlog('info', 'admin.logs_stream_open', { clientIp, replay });
+    return;
   }
 
   // Mock matching for all other routes
@@ -191,6 +310,7 @@ const server = http.createServer((req, res) => {
       queryParams: Array.from(url.searchParams.entries()).map(([key, value]) => ({ key, value })),
       body: body,
     };
+    const reqHeadersObj = Object.fromEntries(Object.entries(req.headers).map(([key, value]) => [key, Array.isArray(value) ? value.join(', ') : (value ?? '')]));
 
     const matchedMock = findMatchingMock(liveRequest, currentMocks);
     const timestamp = new Date().toLocaleTimeString();
@@ -202,11 +322,28 @@ const server = http.createServer((req, res) => {
       const sendResponse = () => {
         // CORS on API responses too
         setCors(res);
+        // Debug headers
+        res.setHeader('X-Mock-Matched', 'true');
+        if (matchedMock.name) res.setHeader('X-Mock-Name', matchedMock.name);
+        if (matchedMock.id) res.setHeader('X-Mock-Id', matchedMock.id);
         mockResponse.headers.forEach((h) => {
           if (h && h.key) res.setHeader(h.key, h.value);
         });
         res.writeHead(mockResponse.status);
         res.end(mockResponse.body);
+        const durationMs = hrtimeMs(startHr).toFixed(1);
+        const responseHeaders = res.getHeaders();
+        jlog('info', 'request.matched', {
+          method: req.method,
+          url: req.url,
+          status: mockResponse.status,
+          durationMs: Number(durationMs),
+          mockId: matchedMock.id,
+          mockName: matchedMock.name,
+          clientIp,
+          requestHeaders: reqHeadersObj,
+          responseHeaders,
+        });
       };
 
       if (mockResponse.delay > 0) {
@@ -220,7 +357,23 @@ const server = http.createServer((req, res) => {
         error: 'No mock match found for the request.',
         request: { method: liveRequest.method, url: req.url, headers: req.headers, body: liveRequest.body || null },
       };
-      return sendJson(404, errorBody);
+      // Add debug header on 404 as well
+      res.setHeader('X-Mock-Matched', 'false');
+      const durationMs = hrtimeMs(startHr).toFixed(1);
+      // send JSON and then log response headers
+      const status = 404;
+      const result = sendJson(404, errorBody);
+      const responseHeaders = res.getHeaders();
+      jlog('info', 'request.no_match', {
+        method: req.method,
+        url: req.url,
+        status,
+        durationMs: Number(durationMs),
+        clientIp,
+        requestHeaders: reqHeadersObj,
+        responseHeaders,
+      });
+      return result;
     }
   });
 });
@@ -229,6 +382,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Mock Server is running on http://localhost:${PORT}`);
   console.log(`   Config path: ${configPath} (exists: ${fs.existsSync(configPath)})`);
   console.log(`   Admin endpoints: /__health, /__mocks (GET/PUT), /__reload`);
+  jlog('info', 'server.start', { port: PORT, configPath, hasConfigFile: fs.existsSync(configPath), logPath: LOG_PATH });
 });
 
 server.on('error', (err) => {

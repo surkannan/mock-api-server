@@ -12,9 +12,24 @@ const serverScript = path.resolve(__dirname, 'server.cjs');
 
 const procs = [];
 
-function start(name, cmd, args) {
-  const p = spawn(cmd, args, { stdio: 'inherit', env: process.env });
+const COLORS = { cyan: '\x1b[36m', magenta: '\x1b[35m', gray: '\x1b[90m', reset: '\x1b[0m' };
+
+function writePrefixed(name, colorCode, chunk, toStdErr = false) {
+  const text = chunk.toString();
+  // Prefix each line in the chunk
+  const prefix = `${colorCode}[${name}]${COLORS.reset} `;
+  const prefixed = text.replace(/^/gm, prefix);
+  (toStdErr ? process.stderr : process.stdout).write(prefixed);
+}
+
+function start(name, cmd, args, colorName) {
+  const colorCode = COLORS[colorName] || '';
+  const p = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
   procs.push(p);
+
+  if (p.stdout) p.stdout.on('data', (d) => writePrefixed(name, colorCode, d, false));
+  if (p.stderr) p.stderr.on('data', (d) => writePrefixed(name, colorCode, d, true));
+
   p.on('exit', (code, signal) => {
     // If one exits, stop the others to keep things tidy
     procs.forEach((cp) => {
@@ -22,17 +37,24 @@ function start(name, cmd, args) {
         try { cp.kill('SIGTERM'); } catch {}
       }
     });
+    const msg = `${name} exited with code ${code}${signal ? ` (signal ${signal})` : ''}`;
+    writePrefixed(name, COLORS.gray, msg + '\n', true);
     process.exit(code ?? 0);
   });
   return p;
 }
 
-// Start Vite UI
-start('vite', viteBin, []);
+// Start Vite UI with less noisy terminal output
+const viteArgs = [
+  '--clearScreen', 'false',
+  '--logLevel', process.env.DEV_VITE_LOG_LEVEL || 'warn',
+  ...((process.env.DEV_VITE_ARGS || '').trim().split(/\s+/).filter(Boolean))
+];
+start('vite', viteBin, viteArgs, 'cyan');
 
 // Start mock server (accepts optional CLI flags via environment e.g. DEV_SERVER_ARGS="--config path.json")
 const serverArgs = (process.env.DEV_SERVER_ARGS || '').trim().split(/\s+/).filter(Boolean);
-start('server', 'node', [serverScript, ...serverArgs]);
+start('server', 'node', [serverScript, ...serverArgs], 'magenta');
 
 // Cleanup on termination
 function cleanup() {

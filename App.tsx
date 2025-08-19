@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Mock } from './types';
 import MockList from './components/MockList';
 import MockFormModal from './components/MockFormModal';
+import LogViewer from './components/LogViewer';
 
 const App: React.FC = () => {
   const [mocks, setMocks] = useState<Mock[]>([]);
@@ -10,8 +11,15 @@ const App: React.FC = () => {
   const [serverHealth, setServerHealth] = useState<null | { ok: boolean; port: number; configPath: string; hasConfigFile: boolean; mocksCount: number }>(null);
   const [autoSync, setAutoSync] = useState(false);
   const [syncing, setSyncing] = useState(false);
-
-  const SERVER_BASE = 'http://localhost:4000';
+  const [lastSyncedJson, setLastSyncedJson] = useState<string | null>(null);
+  const [serverBase, setServerBase] = useState<string>(() => {
+    try {
+      return localStorage.getItem('serverBase') || 'http://localhost:4000';
+    } catch {
+      return 'http://localhost:4000';
+    }
+  });
+  const [activeTab, setActiveTab] = useState<'mocks' | 'logs'>('mocks');
 
   const updateMocks = (newMocks: Mock[]) => {
       const sortedMocks = newMocks.sort((a, b) => parseInt(b.id) - parseInt(a.id));
@@ -74,7 +82,7 @@ const App: React.FC = () => {
   // --- Server integration helpers ---
   const fetchHealth = async () => {
     try {
-      const res = await fetch(`${SERVER_BASE}/__health`);
+      const res = await fetch(`${serverBase}/__health`);
       if (!res.ok) throw new Error('Health check failed');
       const data = await res.json();
       setServerHealth(data);
@@ -85,25 +93,28 @@ const App: React.FC = () => {
 
   const loadFromServer = async () => {
     try {
-      const res = await fetch(`${SERVER_BASE}/__mocks`);
+      const res = await fetch(`${serverBase}/__mocks`);
       if (!res.ok) throw new Error('Failed to load mocks from server');
       const serverMocks: Mock[] = await res.json();
-      updateMocks(Array.isArray(serverMocks) ? serverMocks : []);
+      const sorted = (Array.isArray(serverMocks) ? serverMocks : []).slice().sort((a, b) => parseInt(b.id) - parseInt(a.id));
+      updateMocks(sorted);
+      setLastSyncedJson(JSON.stringify(sorted));
     } catch (e) {
-      alert('Could not load from server. Is it running on port 4000?');
+      alert('Could not load from server. Check the server URL and that it is running.');
     }
   };
 
   const syncToServer = async (persist: boolean, payload?: Mock[]) => {
     setSyncing(true);
     try {
-      const res = await fetch(`${SERVER_BASE}/__mocks?persist=${persist ? 'true' : 'false' }`, {
+      const res = await fetch(`${serverBase}/__mocks?persist=${persist ? 'true' : 'false' }`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload ?? mocks),
       });
       if (!res.ok) throw new Error('Failed to sync mocks');
       await fetchHealth();
+      setLastSyncedJson(JSON.stringify(payload ?? mocks));
     } catch (e) {
       alert('Sync failed. Ensure the server is running and CORS is allowed.');
     } finally {
@@ -113,7 +124,7 @@ const App: React.FC = () => {
 
   const reloadServerFromFile = async () => {
     try {
-      const res = await fetch(`${SERVER_BASE}/__reload`, { method: 'POST' });
+      const res = await fetch(`${serverBase}/__reload`, { method: 'POST' });
       if (!res.ok) throw new Error('Reload failed');
       await fetchHealth();
     } catch (e) {
@@ -125,6 +136,41 @@ const App: React.FC = () => {
     fetchHealth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem('serverBase', serverBase); } catch {}
+  }, [serverBase]);
+
+  useEffect(() => {
+    // Attempt to refresh health when server base changes
+    fetchHealth();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverBase]);
+
+  // Full-screen Logs view (no margins) when Logs tab is active
+  if (activeTab === 'logs') {
+    return (
+      <div className="fixed inset-0 bg-gray-900 text-gray-100 flex flex-col">
+        <div className="p-2 border-b border-gray-800 flex items-center gap-2">
+          <span className={`inline-block w-2.5 h-2.5 rounded-full ${serverHealth ? 'bg-green-400' : 'bg-red-400'}`}></span>
+          <span className="text-sm">Logs · {serverHealth ? `${serverHealth.mocksCount} mocks` : 'disconnected'}</span>
+          <input
+            type="text"
+            value={serverBase}
+            onChange={(e) => setServerBase(e.target.value)}
+            className="ml-2 text-xs bg-gray-900 border border-gray-600 rounded px-2 py-1 font-mono w-64"
+            placeholder="http://localhost:4000"
+          />
+          <button onClick={fetchHealth} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded">Connect</button>
+          <div className="ml-auto" />
+          <button onClick={() => setActiveTab('mocks')} className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded">Back to Mocks</button>
+        </div>
+        <div className="flex-1 min-h-0">
+          <LogViewer serverBase={serverBase} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-screen p-4 bg-gray-900 text-gray-100 flex flex-col items-center">
@@ -149,27 +195,60 @@ const App: React.FC = () => {
               <span className={`inline-block w-2.5 h-2.5 rounded-full ${serverHealth ? 'bg-green-400' : 'bg-red-400'}`}></span>
               <span className="text-sm">
                 {serverHealth ? (
-                  <>Server connected on <code className="bg-gray-700 px-1 rounded">:{serverHealth.port}</code> · {serverHealth.mocksCount} mocks{serverHealth.hasConfigFile ? ' · config file found' : ' · no config file'}</>
+                  <>Server connected: <code className="bg-gray-700 px-1 rounded">{serverBase}</code> · {serverHealth.mocksCount} mocks{serverHealth.hasConfigFile ? ' · config file found' : ' · no config file'}</>
                 ) : (
-                  <>Server unreachable at <code className="bg-gray-700 px-1 rounded">:4000</code></>
+                  <>Server unreachable at <code className="bg-gray-700 px-1 rounded">{serverBase}</code></>
                 )}
               </span>
-              <button onClick={fetchHealth} className="ml-3 text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded">Refresh</button>
+              <input
+                type="text"
+                value={serverBase}
+                onChange={(e) => setServerBase(e.target.value)}
+                className="ml-3 text-xs bg-gray-900 border border-gray-600 rounded px-2 py-1 font-mono w-64"
+                placeholder="http://localhost:4000"
+              />
+              <button onClick={fetchHealth} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded">Connect</button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={loadFromServer} disabled={!serverHealth} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">Load from Server</button>
-              <button onClick={() => syncToServer(false)} disabled={!serverHealth || syncing || mocks.length===0} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync to Server'}</button>
-              <button onClick={() => syncToServer(true)} disabled={!serverHealth || syncing || mocks.length===0} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync & Persist'}</button>
+              {/* in-sync computation */}
+              {/* disabled when in-sync, syncing, or empty */}
+              <button onClick={() => syncToServer(false)} disabled={!serverHealth || syncing || mocks.length===0 || (serverHealth && lastSyncedJson === JSON.stringify(mocks))} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync to Server'}</button>
+              <button onClick={() => syncToServer(true)} disabled={!serverHealth || syncing || mocks.length===0 || (serverHealth && lastSyncedJson === JSON.stringify(mocks))} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync & Persist'}</button>
               <button onClick={reloadServerFromFile} disabled={!serverHealth} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">Reload from File</button>
               <label className="flex items-center gap-2 text-sm ml-2">
                 <input type="checkbox" checked={autoSync} onChange={(e) => setAutoSync(e.target.checked)} />
                 Auto-sync
               </label>
+              {/* Sync status text */}
+              {serverHealth && (
+                <span className="text-xs text-gray-400 ml-2">
+                  {lastSyncedJson === JSON.stringify(mocks) ? 'In sync with server' : 'Unsynced changes'}
+                </span>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Tabs */}
+        <div className="mt-4 flex justify-start">
+          <div className="inline-flex rounded-md overflow-hidden border border-gray-700">
+            <button
+              onClick={() => setActiveTab('mocks')}
+              className={`px-4 py-2 text-sm ${activeTab === 'mocks' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+            >
+              Mocks
+            </button>
+            <button
+              onClick={() => setActiveTab('logs')}
+              className={`px-4 py-2 text-sm ${activeTab === 'logs' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+            >
+              Logs
+            </button>
+          </div>
+        </div>
       </header>
-      <main className="w-full max-w-4xl flex-grow">
+      <main className={`w-full max-w-4xl flex-grow` }>
         <MockList
           mocks={mocks}
           onAdd={handleAddMock}
