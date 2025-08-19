@@ -1,15 +1,18 @@
-
-import React from 'react';
+import React, { useRef } from 'react';
 import { Mock } from '../types';
 import PlusIcon from './icons/PlusIcon';
 import PencilIcon from './icons/PencilIcon';
 import TrashIcon from './icons/TrashIcon';
+import UploadIcon from './icons/UploadIcon';
+import DownloadIcon from './icons/DownloadIcon';
 
 interface MockListProps {
   mocks: Mock[];
   onAdd: () => void;
   onEdit: (mock: Mock) => void;
   onDelete: (id: string) => void;
+  onImport: (mocks: Mock[]) => void;
+  onExport: () => void;
 }
 
 const getMethodColor = (method: string) => {
@@ -23,21 +26,69 @@ const getMethodColor = (method: string) => {
   }
 };
 
-const MockList: React.FC<MockListProps> = ({ mocks, onAdd, onEdit, onDelete }) => {
+const MockList: React.FC<MockListProps> = ({ mocks, onAdd, onEdit, onDelete, onImport, onExport }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target?.result;
+        if (typeof text !== 'string') throw new Error("File is not readable");
+        const importedMocks = JSON.parse(text);
+        
+        // Basic validation
+        if (Array.isArray(importedMocks)) {
+          onImport(importedMocks);
+        } else {
+          alert('Error: Imported file is not a valid mock array.');
+        }
+      } catch (error) {
+        alert('Error parsing JSON file: ' + (error as Error).message);
+      } finally {
+        // Reset file input to allow re-uploading the same file
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="bg-gray-800 rounded-lg shadow-lg flex flex-col h-full">
-      <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-        <h2 className="text-xl font-bold">Configured Mocks</h2>
-        <button onClick={onAdd} className="flex items-center px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded-md text-sm font-medium">
-          <PlusIcon className="w-5 h-5 mr-1" />
-          New
-        </button>
+      <div className="p-4 border-b border-gray-700">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-xl font-bold">Configured Mocks</h2>
+          <button onClick={onAdd} className="flex items-center px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded-md text-sm font-medium">
+            <PlusIcon className="w-5 h-5 mr-1" />
+            New
+          </button>
+        </div>
+        <div className="flex space-x-2">
+            <button onClick={handleImportClick} className="flex-1 flex items-center justify-center px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded-md text-sm font-medium">
+              <UploadIcon className="w-5 h-5 mr-2" />
+              Import
+            </button>
+            <input type="file" accept=".json" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+            <button onClick={onExport} disabled={mocks.length === 0} className="flex-1 flex items-center justify-center px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded-md text-sm font-medium disabled:bg-gray-700 disabled:cursor-not-allowed disabled:text-gray-500">
+              <DownloadIcon className="w-5 h-5 mr-2" />
+              Export
+            </button>
+        </div>
       </div>
       <div className="flex-grow overflow-y-auto p-2">
         {mocks.length === 0 ? (
           <div className="text-center text-gray-500 p-8">
             <p>No mocks configured yet.</p>
-            <p>Click "New" to create one.</p>
+            <p>Click "New" to create one, or "Import" to load a file.</p>
           </div>
         ) : (
           <ul className="space-y-2">

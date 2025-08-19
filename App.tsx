@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback } from 'react';
 import { Mock, LiveRequest, MockResponse, LogEntry } from './types';
 import MockList from './components/MockList';
@@ -40,6 +39,29 @@ const App: React.FC = () => {
   
   const handleClearLogs = () => {
     setLogs([]);
+  };
+
+  const handleExportMocks = () => {
+    if (mocks.length === 0) {
+      alert("No mocks to export.");
+      return;
+    }
+    const jsonString = JSON.stringify(mocks, null, 2);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'mocks-config.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportMocks = (importedMocks: Mock[]) => {
+    if (window.confirm('This will replace your current mock configuration. Are you sure?')) {
+      setMocks(importedMocks);
+    }
   };
 
   const handleSimulatedRequest = useCallback(async (request: LiveRequest): Promise<MockResponse> => {
@@ -117,6 +139,8 @@ const App: React.FC = () => {
             onAdd={handleAddMock}
             onEdit={handleEditMock}
             onDelete={handleDeleteMock}
+            onImport={handleImportMocks}
+            onExport={handleExportMocks}
           />
         </div>
         <div className="lg:col-span-1">

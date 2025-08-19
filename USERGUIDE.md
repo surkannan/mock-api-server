@@ -11,6 +11,7 @@ Welcome to the Mock API Server! This tool allows you to create, configure, and t
 3.  [How-To Guides](#how-to-guides)
     -   [Create a New Mock](#create-a-new-mock)
     -   [Edit or Delete a Mock](#edit-or-delete-a-mock)
+    -   [Persisting Mocks (Import/Export)](#persisting-mocks-importexport)
     -   [Simulate an API Request](#simulate-an-api-request)
     -   [Inspect Logs](#inspect-logs)
     -   [Debug a Mismatched Request](#debug-a-mismatched-request)
@@ -22,7 +23,7 @@ Welcome to the Mock API Server! This tool allows you to create, configure, and t
 
 The application is divided into three main panels:
 
-1.  **Configured Mocks (Left):** This panel lists all the mock endpoints you've created. You can add, edit, or delete mocks from here.
+1.  **Configured Mocks (Left):** This panel lists all the mock endpoints you've created. You can add, edit, delete, import, and export mocks from here.
 2.  **API Simulator (Middle):** This is your testing ground. Construct and send HTTP requests to see how they match against your configured mocks and what response is returned.
 3.  **Request Log (Right):** A real-time log of all requests sent from the API Simulator. It shows which mock was matched (if any) and the resulting status code.
 
@@ -79,6 +80,20 @@ When a request is successfully matched, the server generates the defined respons
 -   **To Edit:** Hover over a mock in the list and click the **pencil icon**. The same form will appear, pre-filled with the mock's data. Make your changes and click "Save Mock".
 -   **To Delete:** Hover over a mock and click the **trash can icon**.
 
+### Persisting Mocks (Import/Export)
+
+You can save your entire mock configuration to a file or load a configuration from a file.
+
+-   **Export Mocks:**
+    1.  In the **Configured Mocks** panel, click the **"Export"** button.
+    2.  This will download a `mocks-config.json` file to your computer. This file contains all of your current mocks.
+
+-   **Import Mocks:**
+    1.  In the **Configured Mocks** panel, click the **"Import"** button.
+    2.  Select a `.json` file that you previously exported.
+    3.  A confirmation dialog will appear, warning you that this will overwrite your current setup.
+    4.  Click "OK" to proceed. Your mocks will be replaced with the content from the file.
+
 ### Simulate an API Request
 
 1.  Go to the **API Simulator** panel.
@@ -114,4 +129,3 @@ If you send a request and it doesn't match any of your configured mocks, you wil
 -   **Partial Matching:** For query parameters, headers, and the request body, the matching logic checks if the actual value *contains* the value specified in the matcher.
     -   *Example:* If a mock header is `Authorization: Bearer`, a request with the header `Authorization: Bearer xyz123` **will match**.
 -   **Empty Fields:** Any empty key-value pairs for headers or query params in a mock's configuration are ignored during matching.
-
