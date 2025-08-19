@@ -16,6 +16,9 @@ Welcome to the Mock API Server! This tool allows you to create, configure, and t
     -   [Inspect Logs](#inspect-logs)
     -   [Debug a Mismatched Request](#debug-a-mismatched-request)
 4.  [Matching Logic Details](#matching-logic-details)
+    -   [Path Matching](#path-matching)
+    -   [Regular Expression Matching](#regular-expression-matching-headers-query-params-body)
+    -   [Empty Fields](#empty-fields)
 
 ---
 
@@ -42,10 +45,11 @@ A "mock" is a single rule that defines how the server should respond to a specif
 When you send a request from the simulator, it's checked against your list of mocks from top to bottom. The **first mock** that satisfies all of its matcher conditions will be used. A request must match **all** of a mock's defined criteria:
 
 -   **HTTP Method:** The method must be an exact match (e.g., `GET`, `POST`).
--   **Path:** The request path must match. You can use path parameters like `/users/:id` which will match `/users/1`, `/users/abc`, etc.
--   **Query Params:** If you define query parameters in the matcher, the request URL must contain all of them. The value check is a partial match (`.includes()`).
--   **Headers:** If you define headers in the matcher, the request must contain all of them. The value check is also a partial match.
--   **Body Contains:** If you provide text in the "Body Contains" field, the request's body must include that text. This is useful for matching specific keywords or properties in a JSON payload.
+-   **Path:** The request path must match the defined pattern. The matcher supports wildcards for powerful matching.
+    -   Use `:param` or `*` to match a single URL segment (e.g., `/users/*` matches `/users/123`).
+    -   Use `**` to match multiple URL segments (e.g., `/assets/**` matches `/assets/img/logo.png`).
+-   **Query Params & Headers:** If defined, the request must contain all of them. The value field supports **regular expressions** for advanced matching. If the value isn't a valid regex, it falls back to a simple substring check.
+-   **Body Contains:** If provided, this field also supports **regular expressions** against the entire request body. It falls back to a substring check if the pattern is not a valid regex.
 
 ### Mock Responses
 
@@ -125,7 +129,30 @@ If you send a request and it doesn't match any of your configured mocks, you wil
 
 ## 4. Matching Logic Details
 
--   **Path Parameters:** The path matcher supports placeholder parameters. A matcher path of `/api/items/:itemId` will match `/api/items/123` and `/api/items/any-string`.
--   **Partial Matching:** For query parameters, headers, and the request body, the matching logic checks if the actual value *contains* the value specified in the matcher.
-    -   *Example:* If a mock header is `Authorization: Bearer`, a request with the header `Authorization: Bearer xyz123` **will match**.
--   **Empty Fields:** Any empty key-value pairs for headers or query params in a mock's configuration are ignored during matching.
+### Path Matching
+
+The path matcher offers several ways to define dynamic paths:
+
+-   **Exact Match:** `/api/users` will only match `/api/users`.
+-   **Path Parameters (Single Segment):** Both `/api/users/:id` and `/api/users/*` will match `/api/users/123` and `/api/users/any-string`, but will **not** match `/api/users/123/profile`.
+-   **Wildcard (Multiple Segments):** `/assets/**` will match `/assets/logo.png`, `/assets/img/icons/user.svg`, and anything else under the `/assets/` path.
+
+### Regular Expression Matching (Headers, Query Params, Body)
+
+The `value` fields for Headers, Query Params, and the `Body Contains` field all support full regular expressions for powerful matching. The matcher will first try to interpret the input as a regex. If it's not a valid regex, it will fall back to a simple "contains" (substring) check.
+
+-   **Header Example:**
+    -   **Matcher Header:** `Authorization` | `^Bearer\s[\w.-]+$`
+    -   **Will Match Request Header:** `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
+    -   **Will Not Match:** `Authorization: Basic dXNlcjpwYXNz`
+
+-   **Body Example:**
+    -   **Matcher Body Contains:** `"userId":\s*\d+`
+    -   **Will Match Request Body:** `{ "transactionId": "abc", "userId": 12345 }`
+    -   **Will Not Match:** `{ "transactionId": "abc", "user": "guest" }`
+
+-   **Fallback Behavior:** If you enter `[invalid-regex` in a value field, the matcher will simply check if the request value contains the literal string `"[invalid-regex"`.
+
+### Empty Fields
+
+Any empty key-value pairs for headers or query params in a mock's configuration are ignored during matching.
