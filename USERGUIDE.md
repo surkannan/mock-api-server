@@ -23,9 +23,11 @@ This decoupled architecture provides the best of both worlds: a rich, user-frien
 
 ## 1. Core Architecture
 
--   **Mock Configuration Editor (Web UI):** The web page is your control panel. You use it to define all your mock endpoints, including their request matchers and desired responses. When you're done, you **export** this configuration to a `mocks-config.json` file. The UI itself does not run the server.
+-   **Mock Configuration Editor (Web UI):** Define mock endpoints (matchers + responses), then either:
+    -   **Export** to a `mocks-config.json` file, or
+    -   **Sync to Server** to push mocks directly into the running server.
 
--   **Mock Server (`server.js`):** This is a standalone Node.js script. You run it from your command line. It automatically finds, loads, and serves your mocks from the `mocks-config.json` file. It's a true HTTP server that can be hit by any tool or application, including `curl`, Postman, or your own frontend projects.
+-   **Mock Server (`server.cjs`):** A standalone Node.js server that serves the configured mocks. It accepts an optional config file and exposes admin endpoints to view/set mocks. You can hit it with `curl`, Postman, or your apps.
 
 ---
 
@@ -33,14 +35,15 @@ This decoupled architecture provides the best of both worlds: a rich, user-frien
 
 This is the standard process for using the tool.
 
-1.  **Configure:** Open the web UI and create/edit your desired mock API rules.
-2.  **Export:** Click the "Export" button in the UI to download your configuration as a `mocks-config.json` file.
-3.  **Locate:** Move the downloaded `mocks-config.json` into the same directory as the `server.js` script.
-4.  **Run:** Open your terminal, navigate to that directory, and start the server with the command:
+1.  **Start Dev (Recommended):**
     ```bash
-    node server.js
+    npm run dev
     ```
-5.  **Connect:** The server will now be running at `http://localhost:4000`. Point your applications to this address. Any changes you make in the UI will require you to export and restart the server.
+    This runs both the UI (Vite) and the mock server together. Open the UI and configure your mocks.
+2.  **Choose how to apply mocks:**
+    -   **Option A – Sync to Server:** Use the UI controls to "Sync to Server" (pushes mocks into memory) or "Sync & Persist" (also writes to the config file on disk on the server).
+    -   **Option B – Export File:** Click "Export" to download `mocks-config.json` and place it next to `server.cjs`. Then either run `npm run dev:server` or `node server.cjs --config mocks-config.json`.
+3.  **Connect:** The server is available at `http://localhost:4000`. Point your applications to this address. You can reload the server from file via the UI or `POST /__reload`.
 
 ---
 
@@ -66,15 +69,17 @@ When a request is matched, the server sends this predefined response:
 -   **Body:** The response payload. Remember to use valid JSON if that's what your client expects.
 -   **Delay:** An optional delay in milliseconds to simulate network latency.
 
-### Importing and Exporting
--   **Export:** The most important button! It generates the `mocks-config.json` file needed by the server.
--   **Import:** Loads a `mocks-config.json` file into the UI, allowing you to continue editing a previous session or a shared configuration. This will overwrite your current unsaved configuration.
+### Importing, Exporting, and Syncing
+-   **Export:** Download `mocks-config.json` that you can feed the server.
+-   **Import:** Load a `mocks-config.json` back into the UI (overwrites current state).
+-   **Sync to Server:** Push current mocks directly into the running server without writing a file.
+-   **Sync & Persist:** Push mocks and ask the server to write `mocks-config.json` for you.
 
 ---
 
 ## 4. Running the Mock Server
 
-Once `server.js` is running, it will print messages to your console for every request it receives, telling you whether it was matched to a mock or not.
+Once `server.cjs` is running, it prints a log for every request received and whether it matched a mock.
 
 ### Example with `curl`
 If you have a mock for `GET /users/1` and your server is running:
@@ -83,7 +88,7 @@ If you have a mock for `GET /users/1` and your server is running:
 curl -v http://localhost:4000/users/1
 
 # You will see the mock response in your terminal, and a "Matched" log
-# will appear in the terminal where server.js is running.
+# will appear in the terminal where server.cjs is running.
 ```
 
 ### Debugging a Mismatched Request
@@ -105,3 +110,12 @@ If you send a request and it doesn't match any mock, the server will return a `4
 The `value` field for **Headers**, **Query Params**, and the **Body Contains** field all support full regular expressions. If the text you enter is not a valid regex, the system will fall back to a simple "contains substring" check.
 
 -   **Example:** To match an `Authorization` header for any JWT Bearer token, you could use the regex: `^Bearer\s[\w.-]+$`
+
+## 6. Admin Endpoints
+
+The server exposes a few admin endpoints to simplify integration with the UI:
+
+-   `GET /__health` → Returns server status and counts.
+-   `GET /__mocks` → Returns in-memory mocks.
+-   `PUT /__mocks?persist=true|false` → Replace in-memory mocks with the provided array; persist to file if `persist=true`.
+-   `POST /__reload` → Reload mocks from the config file on disk (if present).

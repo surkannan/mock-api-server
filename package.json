@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node dev.cjs",
+    "dev:ui": "vite",
+    "dev:server": "node server.cjs",
     "build": "vite build",
     "preview": "vite preview"
   },

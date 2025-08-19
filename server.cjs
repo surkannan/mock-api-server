@@ -6,6 +6,47 @@ const path = require('path');
 const PORT = 4000;
 const CONFIG_FILE = 'mocks-config.json';
 
+// --- Config path and in-memory store ---
+const args = process.argv.slice(2);
+let providedConfigPath = process.env.MOCKS_CONFIG || null;
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--config' && args[i + 1]) {
+    providedConfigPath = args[i + 1];
+    i++;
+  }
+}
+
+const defaultConfigPath = path.join(__dirname, CONFIG_FILE);
+const configPath = providedConfigPath || defaultConfigPath;
+
+let currentMocks = [];
+
+const loadMocksFromFile = () => {
+  try {
+    if (configPath && fs.existsSync(configPath)) {
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      currentMocks = JSON.parse(raw);
+      console.log(`Loaded ${currentMocks.length} mocks from ${configPath}`);
+    } else {
+      currentMocks = [];
+      console.log(`No config file found. Running with 0 mocks. (Optional) Looking for: ${configPath}`);
+    }
+  } catch (err) {
+    console.error(`[WARN] Failed to read or parse config at ${configPath}:`, err.message);
+    currentMocks = [];
+  }
+};
+
+const persistMocksToFile = () => {
+  try {
+    fs.writeFileSync(configPath, JSON.stringify(currentMocks, null, 2), 'utf-8');
+    return true;
+  } catch (err) {
+    console.error('[ERROR] Failed to persist mocks to file:', err.message);
+    return false;
+  }
+};
+
 // --- Matcher Logic (ported from services/matcher.ts) ---
 
 const pathMatches = (template, actual) => {
@@ -69,22 +110,76 @@ const findMatchingMock = (request, mocks) => {
 
 // --- Server Implementation ---
 
+loadMocksFromFile();
+
+const setCors = (res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+};
+
 const server = http.createServer((req, res) => {
-  let mocks = [];
-  try {
-    const rawConfig = fs.readFileSync(path.join(__dirname, CONFIG_FILE), 'utf-8');
-    mocks = JSON.parse(rawConfig);
-  } catch (err) {
-    console.error(`[ERROR] Could not read or parse ${CONFIG_FILE}.`, err);
-    res.writeHead(500, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: `Could not load ${CONFIG_FILE}. Make sure the file exists and is valid JSON.` }));
+  const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // CORS preflight
+  if (req.method === 'OPTIONS') {
+    setCors(res);
+    res.writeHead(204);
+    res.end();
     return;
   }
 
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  let body = '';
+  const sendJson = (status, obj) => {
+    setCors(res);
+    res.writeHead(status, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(obj, null, 2));
+  };
 
-  req.on('data', chunk => {
+  // Admin endpoints
+  if (url.pathname === '/__health' && req.method === 'GET') {
+    return sendJson(200, {
+      ok: true,
+      port: PORT,
+      configPath,
+      hasConfigFile: fs.existsSync(configPath),
+      mocksCount: currentMocks.length,
+    });
+  }
+
+  if (url.pathname === '/__mocks') {
+    if (req.method === 'GET') {
+      return sendJson(200, currentMocks);
+    }
+    if (req.method === 'PUT') {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk.toString()));
+      req.on('end', () => {
+        try {
+          const incoming = JSON.parse(body || '[]');
+          if (!Array.isArray(incoming)) {
+            return sendJson(400, { ok: false, error: 'Body must be an array of mocks' });
+          }
+          currentMocks = incoming;
+          const persist = (url.searchParams.get('persist') || 'false') === 'true';
+          let persisted = false;
+          if (persist) persisted = persistMocksToFile();
+          return sendJson(200, { ok: true, count: currentMocks.length, persisted });
+        } catch (e) {
+          return sendJson(400, { ok: false, error: 'Invalid JSON body', message: e.message });
+        }
+      });
+      return;
+    }
+  }
+
+  if (url.pathname === '/__reload' && req.method === 'POST') {
+    loadMocksFromFile();
+    return sendJson(200, { ok: true, count: currentMocks.length });
+  }
+
+  // Mock matching for all other routes
+  let body = '';
+  req.on('data', (chunk) => {
     body += chunk.toString();
   });
 
@@ -97,16 +192,18 @@ const server = http.createServer((req, res) => {
       body: body,
     };
 
-    const matchedMock = findMatchingMock(liveRequest, mocks);
+    const matchedMock = findMatchingMock(liveRequest, currentMocks);
     const timestamp = new Date().toLocaleTimeString();
 
     if (matchedMock) {
       const { response: mockResponse } = matchedMock;
       console.log(`[${timestamp}] [200] ${req.method} ${req.url} -> Matched: "${matchedMock.name}"`);
-      
+
       const sendResponse = () => {
-        Object.entries(mockResponse.headers).forEach(([key, value]) => {
-          if (value.key) res.setHeader(value.key, value.value);
+        // CORS on API responses too
+        setCors(res);
+        mockResponse.headers.forEach((h) => {
+          if (h && h.key) res.setHeader(h.key, h.value);
         });
         res.writeHead(mockResponse.status);
         res.end(mockResponse.body);
@@ -120,24 +217,24 @@ const server = http.createServer((req, res) => {
     } else {
       console.log(`[${timestamp}] [404] ${req.method} ${req.url} -> No Match`);
       const errorBody = {
-          error: "No mock match found for the request.",
-          request: { method: liveRequest.method, url: req.url, headers: req.headers, body: liveRequest.body || null }
+        error: 'No mock match found for the request.',
+        request: { method: liveRequest.method, url: req.url, headers: req.headers, body: liveRequest.body || null },
       };
-      res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(errorBody, null, 2));
+      return sendJson(404, errorBody);
     }
   });
 });
 
 server.listen(PORT, () => {
   console.log(`🚀 Mock Server is running on http://localhost:${PORT}`);
-  console.log(`   Waiting for '${CONFIG_FILE}'... (Export from the UI)`);
+  console.log(`   Config path: ${configPath} (exists: ${fs.existsSync(configPath)})`);
+  console.log(`   Admin endpoints: /__health, /__mocks (GET/PUT), /__reload`);
 });
 
 server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        console.error(`[ERROR] Port ${PORT} is already in use. Please stop the other process or choose a different port.`);
-    } else {
-        console.error('[ERROR] Server error:', err);
-    }
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[ERROR] Port ${PORT} is already in use. Please stop the other process or choose a different port.`);
+  } else {
+    console.error('[ERROR] Server error:', err);
+  }
 });
