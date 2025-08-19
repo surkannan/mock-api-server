@@ -1,0 +1,5 @@
+
+{
+  "name": "Mock API Server UI",
+  "description": "A web UI to configure and simulate a mock API server. Define endpoints with request matching (path, method, headers, body) and configure mock responses (status, body, headers, delay). Includes a live request log and a simulator to test your configurations."
+}
