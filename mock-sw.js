@@ -124,11 +124,29 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. IMPORTANT: This is the core routing logic.
-  // We bypass the mock server for any request going to the UI's path or for UI assets.
-  // This allows the UI to load and function correctly.
-  if (url.pathname.startsWith('/.ui/') || url.pathname === '/vite.svg') {
-    return; // Let the browser handle the request as usual.
+  // 2. IMPORTANT: Never intercept HTML navigations or UI assets in dev.
+  // Treat navigations and document requests as UI and bypass.
+  if (event.request.mode === 'navigate' || event.request.destination === 'document') {
+    return;
+  }
+  // Requests that accept HTML should be treated as UI navigations, bypass them.
+  const accept = event.request.headers.get('accept') || '';
+  if (accept.includes('text/html')) {
+    return;
+  }
+  // Bypass known Vite UI asset paths and internal endpoints
+  if (
+    url.pathname === '/' ||
+    url.pathname === '/index.html' ||
+    url.pathname === '/vite.svg' ||
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.startsWith('/@vite') ||
+    url.pathname.startsWith('/@id/') ||
+    url.pathname.startsWith('/@react-refresh') ||
+    url.pathname.startsWith('/node_modules/') ||
+    url.pathname.startsWith('/.ui/')
+  ) {
+    return;
   }
   
   // 3. Ignore the service worker file itself to prevent loops.

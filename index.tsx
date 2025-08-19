@@ -13,3 +13,13 @@ root.render(
     <App />
   </React.StrictMode>
 );
+
+// Dev-only: ensure no previously registered service worker hijacks navigation
+if (import.meta.env.DEV && 'serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then((regs) => {
+    regs.forEach((reg) => reg.unregister());
+  });
+  if ('caches' in window) {
+    caches.keys().then((keys) => keys.forEach((k) => caches.delete(k)));
+  }
+}
