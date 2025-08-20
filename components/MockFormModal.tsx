@@ -82,9 +82,14 @@ const KeyValueEditor: React.FC<{
 
 const MockFormModal: React.FC<MockFormModalProps> = ({ isOpen, onClose, onSave, initialMock }) => {
   const [mock, setMock] = useState<Mock>(getInitialMockData());
+  const [showRespEditor, setShowRespEditor] = useState(false);
+  const [respDraft, setRespDraft] = useState('');
+  const [respError, setRespError] = useState<string | null>(null);
 
   useEffect(() => {
     setMock(initialMock ? JSON.parse(JSON.stringify(initialMock)) : getInitialMockData());
+    setRespError(null);
+    setShowRespEditor(false);
   }, [initialMock, isOpen]);
 
   if (!isOpen) return null;
@@ -99,7 +104,7 @@ const MockFormModal: React.FC<MockFormModalProps> = ({ isOpen, onClose, onSave, 
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
-      <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+      <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-[95vw] xl:max-w-[1400px] max-h-[92vh] flex flex-col">
         <div className="p-4 border-b border-gray-700">
           <h2 className="text-xl font-bold">{initialMock ? 'Edit Mock' : 'Create New Mock'}</h2>
         </div>
@@ -143,7 +148,7 @@ const MockFormModal: React.FC<MockFormModalProps> = ({ isOpen, onClose, onSave, 
                   placeholder='{"key": "value"}'
                   value={mock.matcher.body}
                   onChange={(e) => setMatcher({ body: e.target.value })}
-                  className="w-full h-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full h-40 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
                 />
               </div>
             </div>
@@ -169,12 +174,22 @@ const MockFormModal: React.FC<MockFormModalProps> = ({ isOpen, onClose, onSave, 
               </div>
               <KeyValueEditor title="Headers" items={mock.response.headers} setItems={(items) => setResponse({headers: items as KeyValue[]})} />
               <div>
-                <h4 className="text-md font-semibold text-gray-300 mb-2">Body</h4>
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="text-md font-semibold text-gray-300">Body</h4>
+                  <button
+                    type="button"
+                    onClick={() => { setRespDraft(mock.response.body); setRespError(null); setShowRespEditor(true); }}
+                    className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200"
+                    title="Open large editor"
+                  >
+                    Expand
+                  </button>
+                </div>
                 <textarea
                   placeholder='{"message": "Success!"}'
                   value={mock.response.body}
                   onChange={(e) => setResponse({ body: e.target.value })}
-                  className="w-full h-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full h-72 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-y"
                 />
                 {/* Cheatsheet */}
                 <details className="mt-3 bg-gray-800/60 border border-gray-700 rounded-md">
@@ -215,6 +230,66 @@ const MockFormModal: React.FC<MockFormModalProps> = ({ isOpen, onClose, onSave, 
           <button onClick={onClose} className="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md text-sm font-medium">Cancel</button>
           <button onClick={handleSave} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-md text-sm font-medium">Save Mock</button>
         </div>
+        {showRespEditor && (
+          <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
+            <div className="w-full max-w-[95vw] xl:max-w-[1400px] max-h-[92vh] bg-gray-800 rounded-lg shadow-2xl flex flex-col">
+              <div className="p-4 border-b border-gray-700 flex items-center justify-between">
+                <h3 className="text-lg font-semibold">Edit Response Body</h3>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      try {
+                        const parsed = JSON.parse(respDraft);
+                        setRespDraft(JSON.stringify(parsed, null, 2));
+                        setRespError(null);
+                      } catch (e: any) {
+                        setRespError(e?.message || 'Invalid JSON');
+                      }
+                    }}
+                    className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200"
+                  >
+                    Format JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowRespEditor(false)}
+                    className="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600 text-gray-200"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+              {respError && (
+                <div className="px-4 py-2 text-xs text-red-300 bg-red-900/20 border-b border-red-800">{respError}</div>
+              )}
+              <div className="p-4 overflow-auto">
+                <textarea
+                  value={respDraft}
+                  onChange={(e) => { setRespDraft(e.target.value); if (respError) setRespError(null); }}
+                  spellCheck={false}
+                  className="w-full h-[65vh] min-h-[300px] bg-gray-900 border border-gray-700 rounded-md px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
+              <div className="p-4 border-t border-gray-700 flex justify-end gap-2 bg-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setShowRespEditor(false)}
+                  className="px-3 py-2 text-sm rounded bg-gray-700 hover:bg-gray-600 text-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setResponse({ body: respDraft }); setShowRespEditor(false); }}
+                  className="px-3 py-2 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

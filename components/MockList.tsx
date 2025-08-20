@@ -8,6 +8,15 @@ import DownloadIcon from './icons/DownloadIcon';
 
 type DisplayRow = { kind: 'present'; mock: Mock } | { kind: 'removed'; mock: Mock };
 
+const getStatusColor = (status?: number) => {
+  if (!status && status !== 0) return 'text-gray-400';
+  if (status >= 200 && status < 300) return 'text-green-400';
+  if (status >= 300 && status < 400) return 'text-yellow-300';
+  if (status >= 400 && status < 500) return 'text-orange-400';
+  if (status >= 500) return 'text-red-400';
+  return 'text-gray-400';
+};
+
 interface MockListProps {
   displayRows?: DisplayRow[];
   mocks?: Mock[]; // backward compat
@@ -116,6 +125,7 @@ const MockList: React.FC<MockListProps> = ({ displayRows, mocks, unsyncedIds, on
                         <span className={`font-bold w-16 ${getMethodColor(method)}`}>{method || '-'}</span>
                         <span className="truncate">{path || '-'}</span>
                       </div>
+                      {/* flags moved to far-right column */}
                     </div>
                     <div className="flex items-center justify-end">
                       {isRemoved ? (
@@ -126,18 +136,44 @@ const MockList: React.FC<MockListProps> = ({ displayRows, mocks, unsyncedIds, on
                     </div>
                     {isRemoved ? (
                       <div className="flex items-center space-x-2 justify-end">
+                        <div className="flex items-center gap-2 text-[11px] mr-2">
+                          <span className={`font-mono ${getStatusColor((mock as any).response?.status)}`}>→ {(mock as any).response?.status ?? '-'}</span>
+                          {((mock as any).response?.headers?.length ?? 0) > 0 && (
+                            <span className="uppercase tracking-wide text-gray-300 bg-gray-700/60 border border-gray-600 rounded px-1.5 py-0.5">headers</span>
+                          )}
+                          {(((mock as any).response?.body ?? '').toString().trim().length) > 0 && (
+                            <span className="uppercase tracking-wide text-gray-300 bg-gray-700/60 border border-gray-600 rounded px-1.5 py-0.5">body</span>
+                          )}
+                          {(((mock as any).response?.delay ?? 0) > 0) && (
+                            <span className="uppercase tracking-wide text-gray-300 bg-gray-700/60 border border-gray-600 rounded px-1.5 py-0.5">delay</span>
+                          )}
+                        </div>
                         {onRestoreRemoved && (
                           <button onClick={() => onRestoreRemoved(mock)} className="px-2 py-1 text-xs bg-amber-600 hover:bg-amber-500 rounded">Restore</button>
                         )}
                       </div>
                     ) : (
-                      <div className="flex items-center space-x-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => onEdit(mock)} className="p-1 text-gray-400 hover:text-white">
-                          <PencilIcon className="w-5 h-5" />
-                        </button>
-                        <button onClick={() => onDelete(mock.id)} className="p-1 text-gray-400 hover:text-red-400">
-                          <TrashIcon className="w-5 h-5" />
-                        </button>
+                      <div className="flex items-center space-x-2 justify-end">
+                        <div className="flex items-center gap-2 text-[11px] mr-2">
+                          <span className={`font-mono ${getStatusColor((mock as any).response?.status)}`}>→ {(mock as any).response?.status ?? '-'}</span>
+                          {((mock as any).response?.headers?.length ?? 0) > 0 && (
+                            <span className="uppercase tracking-wide text-gray-300 bg-gray-700/60 border border-gray-600 rounded px-1.5 py-0.5">headers</span>
+                          )}
+                          {(((mock as any).response?.body ?? '').toString().trim().length) > 0 && (
+                            <span className="uppercase tracking-wide text-gray-300 bg-gray-700/60 border border-gray-600 rounded px-1.5 py-0.5">body</span>
+                          )}
+                          {(((mock as any).response?.delay ?? 0) > 0) && (
+                            <span className="uppercase tracking-wide text-gray-300 bg-gray-700/60 border border-gray-600 rounded px-1.5 py-0.5">delay</span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button onClick={() => onEdit(mock)} className="p-1 text-gray-400 hover:text-white">
+                            <PencilIcon className="w-5 h-5" />
+                          </button>
+                          <button onClick={() => onDelete(mock.id)} className="p-1 text-gray-400 hover:text-red-400">
+                            <TrashIcon className="w-5 h-5" />
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
