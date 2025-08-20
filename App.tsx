@@ -21,6 +21,24 @@ const App: React.FC = () => {
   });
   const [activeTab, setActiveTab] = useState<'mocks' | 'logs'>('mocks');
 
+  // Tabs switcher (button group only)
+  const Tabs = (
+    <div className="inline-flex rounded-md overflow-hidden border border-gray-700">
+      <button
+        onClick={() => setActiveTab('mocks')}
+        className={`px-4 py-2 text-sm ${activeTab === 'mocks' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+      >
+        Mocks
+      </button>
+      <button
+        onClick={() => setActiveTab('logs')}
+        className={`px-4 py-2 text-sm ${activeTab === 'logs' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
+      >
+        Logs
+      </button>
+    </div>
+  );
+
   const updateMocks = (newMocks: Mock[]) => {
       const sortedMocks = newMocks.sort((a, b) => parseInt(b.id) - parseInt(a.id));
       setMocks(sortedMocks);
@@ -163,7 +181,7 @@ const App: React.FC = () => {
           />
           <button onClick={fetchHealth} className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded">Connect</button>
           <div className="ml-auto" />
-          <button onClick={() => setActiveTab('mocks')} className="text-xs px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded">Back to Mocks</button>
+          {Tabs}
         </div>
         <div className="flex-1 min-h-0">
           <LogViewer serverBase={serverBase} />
@@ -174,6 +192,9 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen w-screen p-4 bg-gray-900 text-gray-100 flex flex-col items-center">
+      <div className="w-full max-w-4xl mx-auto flex justify-end">
+        {Tabs}
+      </div>
       <header className="mb-6 text-center w-full max-w-4xl">
         <h1 className="text-3xl font-bold">Mock Configuration Editor</h1>
         <div className="text-left bg-gray-800 p-4 rounded-lg mt-4 border border-blue-500/30">
@@ -230,23 +251,6 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="mt-4 flex justify-start">
-          <div className="inline-flex rounded-md overflow-hidden border border-gray-700">
-            <button
-              onClick={() => setActiveTab('mocks')}
-              className={`px-4 py-2 text-sm ${activeTab === 'mocks' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
-            >
-              Mocks
-            </button>
-            <button
-              onClick={() => setActiveTab('logs')}
-              className={`px-4 py-2 text-sm ${activeTab === 'logs' ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-200'}`}
-            >
-              Logs
-            </button>
-          </div>
-        </div>
       </header>
       <main className={`w-full max-w-4xl flex-grow` }>
         <MockList

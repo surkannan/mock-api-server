@@ -44,10 +44,10 @@ function start(name, cmd, args, colorName) {
   return p;
 }
 
-// Start Vite UI with less noisy terminal output
+// Start Vite UI; default to 'info' so the startup URL/port is visible
 const viteArgs = [
   '--clearScreen', 'false',
-  '--logLevel', process.env.DEV_VITE_LOG_LEVEL || 'warn',
+  '--logLevel', process.env.DEV_VITE_LOG_LEVEL || 'info',
   ...((process.env.DEV_VITE_ARGS || '').trim().split(/\s+/).filter(Boolean))
 ];
 start('vite', viteBin, viteArgs, 'cyan');
