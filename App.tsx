@@ -20,6 +20,9 @@ const App: React.FC = () => {
     }
   });
   const [activeTab, setActiveTab] = useState<'mocks' | 'logs'>('mocks');
+  const [bootstrapped, setBootstrapped] = useState<boolean>(() => {
+    try { return localStorage.getItem('bootstrappedFromServer') === 'true'; } catch { return false; }
+  });
 
   // Tabs switcher (button group only)
   const Tabs = (
@@ -164,6 +167,19 @@ const App: React.FC = () => {
     fetchHealth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverBase]);
+
+  // Auto-bootstrap mocks from server on first load (once per browser)
+  useEffect(() => {
+    if (!bootstrapped && serverHealth?.ok && mocks.length === 0) {
+      loadFromServer()
+        .then(() => {
+          try { localStorage.setItem('bootstrappedFromServer', 'true'); } catch {}
+          setBootstrapped(true);
+        })
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverHealth, bootstrapped, mocks.length]);
 
   // Full-screen Logs view (no margins) when Logs tab is active
   if (activeTab === 'logs') {
