@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Mock } from './types';
 import MockList from './components/MockList';
 import MockFormModal from './components/MockFormModal';
 import LogViewer from './components/LogViewer';
+
+type DisplayRow = { kind: 'present'; mock: Mock } | { kind: 'removed'; mock: Mock };
 
 const App: React.FC = () => {
   const [mocks, setMocks] = useState<Mock[]>([]);
@@ -11,6 +13,7 @@ const App: React.FC = () => {
   const [serverHealth, setServerHealth] = useState<null | { ok: boolean; port: number; configPath: string; hasConfigFile: boolean; mocksCount: number }>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedJson, setLastSyncedJson] = useState<string | null>(null);
+  const [lastSyncedOrder, setLastSyncedOrder] = useState<string[] | null>(null);
   const [serverBase, setServerBase] = useState<string>(() => {
     try {
       return localStorage.getItem('serverBase') || 'http://localhost:4000';
@@ -23,6 +26,55 @@ const App: React.FC = () => {
     try { return localStorage.getItem('bootstrappedFromServer') === 'true'; } catch { return false; }
   });
   const [syncMenuOpen, setSyncMenuOpen] = useState(false);
+
+  // Deterministic comparator for mocks: numeric id desc if numeric, else string id desc; tie-breaker by path then method
+  const toNumber = (s: string) => {
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // Snapshot order (from lastSyncedJson) to keep display positions stable while editing
+  const snapshotOrder = useMemo(() => {
+    try {
+      const ids: string[] | null = lastSyncedOrder ?? (() => {
+        if (!lastSyncedJson) return null;
+        const arr = JSON.parse(lastSyncedJson);
+        if (!Array.isArray(arr)) return null;
+        return arr.map((m: any) => String(m?.id)).filter(Boolean);
+      })();
+      if (!ids) return new Map<string, number>();
+      const map = new Map<string, number>();
+      ids.forEach((id, idx) => map.set(String(id), idx));
+      return map;
+    } catch {
+      return new Map<string, number>();
+    }
+  }, [lastSyncedJson, lastSyncedOrder]);
+
+  // Display comparator: honor snapshot order; new items (not in snapshot) come first by id desc
+  const compareDisplay = (a: Mock, b: Mock) => {
+    const ai = snapshotOrder.get(a.id);
+    const bi = snapshotOrder.get(b.id);
+    const aIn = ai !== undefined;
+    const bIn = bi !== undefined;
+    if (aIn && bIn) return (ai as number) - (bi as number);
+    if (aIn && !bIn) return 1; // existing after new
+    if (!aIn && bIn) return -1; // new before existing
+    // both new: fall back to id desc (numeric if possible)
+    return compareMocks(a, b);
+  };
+  const compareMocks = (a: Mock, b: Mock) => {
+    const an = toNumber(a.id);
+    const bn = toNumber(b.id);
+    if (an !== null && bn !== null) return bn - an;
+    if (a.id !== b.id) return b.id.localeCompare(a.id);
+    const ap = a.matcher?.path || '';
+    const bp = b.matcher?.path || '';
+    if (ap !== bp) return ap.localeCompare(bp);
+    const am = a.matcher?.method || '';
+    const bm = b.matcher?.method || '';
+    return am.localeCompare(bm);
+  };
 
   // Stable stringify helpers to avoid false diffs due to order/key differences
   const sortKV = <T extends { key: string; value: string }>(arr: T[]): T[] =>
@@ -52,7 +104,7 @@ const App: React.FC = () => {
     return v;
   };
   const stableStringifyMocks = (arr: Mock[]) => {
-    const byIdDesc = arr.slice().sort((a, b) => parseInt(b.id) - parseInt(a.id));
+    const byIdDesc = arr.slice().sort(compareMocks);
     const pre = byIdDesc.map(normalizeMock);
     const normalized = pre.map((m) => normalizeValue(m));
     return JSON.stringify(normalized);
@@ -77,7 +129,7 @@ const App: React.FC = () => {
   );
 
   const updateMocks = (newMocks: Mock[]) => {
-      const sortedMocks = newMocks.sort((a, b) => parseInt(b.id) - parseInt(a.id));
+      const sortedMocks = newMocks.sort(compareDisplay);
       setMocks(sortedMocks);
       // persist UI state locally to survive reloads
       try { localStorage.setItem('uiMocks', JSON.stringify(sortedMocks)); } catch {}
@@ -149,11 +201,14 @@ const App: React.FC = () => {
       const res = await fetch(`${serverBase}/__mocks`);
       if (!res.ok) throw new Error('Failed to load mocks from server');
       const serverMocks: Mock[] = await res.json();
-      const sorted = (Array.isArray(serverMocks) ? serverMocks : []).slice().sort((a, b) => parseInt(b.id) - parseInt(a.id));
+      const sorted = (Array.isArray(serverMocks) ? serverMocks : []).slice().sort(compareDisplay);
       updateMocks(sorted);
       const synced = stableStringifyMocks(sorted);
       setLastSyncedJson(synced);
       try { localStorage.setItem('lastSyncedJson', synced); } catch {}
+      const orderIds = sorted.map(m => m.id);
+      setLastSyncedOrder(orderIds);
+      try { localStorage.setItem('lastSyncedOrder', JSON.stringify(orderIds)); } catch {}
     } catch (e) {
       alert('Could not load from server. Check the server URL and that it is running.');
     }
@@ -169,9 +224,13 @@ const App: React.FC = () => {
       });
       if (!res.ok) throw new Error('Failed to sync mocks');
       await fetchHealth();
-      const synced = stableStringifyMocks(payload ?? mocks);
+      const finalMocks = payload ?? mocks;
+      const synced = stableStringifyMocks(finalMocks);
       setLastSyncedJson(synced);
       try { localStorage.setItem('lastSyncedJson', synced); } catch {}
+      const orderIds = finalMocks.slice().sort(compareDisplay).map(m => m.id);
+      setLastSyncedOrder(orderIds);
+      try { localStorage.setItem('lastSyncedOrder', JSON.stringify(orderIds)); } catch {}
     } catch (e) {
       alert('Sync failed. Ensure the server is running and CORS is allowed.');
     } finally {
@@ -201,12 +260,23 @@ const App: React.FC = () => {
       if (raw) {
         const arr = JSON.parse(raw) as Mock[];
         if (Array.isArray(arr)) {
-          const sorted = arr.slice().sort((a, b) => parseInt(b.id) - parseInt(a.id));
+          const sorted = arr.slice().sort(compareDisplay);
           setMocks(sorted);
+          // If no snapshot exists at all, seed snapshot order from current UI order to keep positions stable
+          const hasSnapshot = Boolean(localStorage.getItem('lastSyncedJson') || localStorage.getItem('lastSyncedOrder'));
+          if (!hasSnapshot && sorted.length > 0) {
+            const orderIds = sorted.map(m => m.id);
+            setLastSyncedOrder(orderIds);
+            try { localStorage.setItem('lastSyncedOrder', JSON.stringify(orderIds)); } catch {}
+          }
         }
       }
       const last = localStorage.getItem('lastSyncedJson');
       if (last) setLastSyncedJson(last);
+      const orderRaw = localStorage.getItem('lastSyncedOrder');
+      if (orderRaw) {
+        try { setLastSyncedOrder(JSON.parse(orderRaw)); } catch {}
+      }
     } catch {}
   }, []);
 
@@ -264,6 +334,69 @@ const App: React.FC = () => {
       return new Set<string>();
     }
   })();
+
+  // Derive mocks that existed at last sync but are now missing locally (deleted but not synced)
+  const removedUnsyncedMocks: Mock[] = (() => {
+    try {
+      if (!lastSyncedJson) return [];
+      const parsed = JSON.parse(lastSyncedJson) as any[];
+      if (!Array.isArray(parsed)) return [];
+      const currentIds = new Set(mocks.map(m => String(m.id)));
+      const removed = parsed.filter((m) => m && m.id && !currentIds.has(String(m.id)));
+      // Best-effort cast to Mock; fields were stored from server snapshot
+      return removed as unknown as Mock[];
+    } catch {
+      return [];
+    }
+  })();
+
+  const handleRestoreRemovedMock = (mock: Mock) => {
+    // Re-add the mock locally
+    updateMocks([mock, ...mocks]);
+  };
+
+  // Build a unified display list: new items first (not in snapshot), then snapshot-ordered items with inline placeholders for deleted
+  const displayRows: DisplayRow[] = useMemo(() => {
+    try {
+      const byId = new Map<string, Mock>();
+      mocks.forEach(m => byId.set(m.id, m));
+      // Preferred order of existing items
+      const orderIds: string[] = lastSyncedOrder ?? (() => {
+        try {
+          if (!lastSyncedJson) return [] as string[];
+          const arr = JSON.parse(lastSyncedJson);
+          if (!Array.isArray(arr)) return [] as string[];
+          return arr.map((m: any) => String(m?.id)).filter(Boolean);
+        } catch { return [] as string[]; }
+      })();
+      const orderSet = new Set(orderIds);
+      const newItems = mocks.filter(m => !orderSet.has(m.id)).sort(compareMocks).map<DisplayRow>((m) => ({ kind: 'present', mock: m }));
+
+      // Build map of last-synced mocks for placeholders
+      let lastSyncedById = new Map<string, any>();
+      try {
+        if (lastSyncedJson) {
+          const arr = JSON.parse(lastSyncedJson);
+          if (Array.isArray(arr)) {
+            arr.forEach((m: any) => { if (m && m.id != null) lastSyncedById.set(String(m.id), m); });
+          }
+        }
+      } catch {}
+
+      const existingOrdered: DisplayRow[] = orderIds.map((id) => {
+        const present = byId.get(id);
+        if (present) return { kind: 'present', mock: present };
+        const prev = lastSyncedById.get(id);
+        if (prev) return { kind: 'removed', mock: prev as Mock };
+        return null as unknown as DisplayRow;
+      }).filter(Boolean) as DisplayRow[];
+
+      // Render snapshot-ordered rows first (present/removed inline), then append new items
+      return [...existingOrdered, ...newItems];
+    } catch {
+      return mocks.map<DisplayRow>((m) => ({ kind: 'present', mock: m }));
+    }
+  }, [mocks, lastSyncedJson, lastSyncedOrder]);
 
   // Full-screen Logs view (no margins) when Logs tab is active
   if (activeTab === 'logs') {
@@ -377,8 +510,9 @@ const App: React.FC = () => {
       </header>
       <main className={`w-full max-w-4xl flex-grow` }>
         <MockList
-          mocks={mocks}
+          displayRows={displayRows}
           unsyncedIds={unsyncedIds}
+          onRestoreRemoved={handleRestoreRemovedMock}
           onAdd={handleAddMock}
           onEdit={handleEditMock}
           onDelete={handleDeleteMock}

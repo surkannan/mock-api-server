@@ -6,9 +6,13 @@ import TrashIcon from './icons/TrashIcon';
 import UploadIcon from './icons/UploadIcon';
 import DownloadIcon from './icons/DownloadIcon';
 
+type DisplayRow = { kind: 'present'; mock: Mock } | { kind: 'removed'; mock: Mock };
+
 interface MockListProps {
-  mocks: Mock[];
+  displayRows?: DisplayRow[];
+  mocks?: Mock[]; // backward compat
   unsyncedIds?: Set<string>;
+  onRestoreRemoved?: (mock: Mock) => void;
   onAdd: () => void;
   onEdit: (mock: Mock) => void;
   onDelete: (id: string) => void;
@@ -16,7 +20,7 @@ interface MockListProps {
   onExport: () => void;
 }
 
-const getMethodColor = (method: string) => {
+const getMethodColor = (method?: string) => {
   switch (method) {
     case 'GET': return 'text-green-400';
     case 'POST': return 'text-blue-400';
@@ -27,7 +31,7 @@ const getMethodColor = (method: string) => {
   }
 };
 
-const MockList: React.FC<MockListProps> = ({ mocks, unsyncedIds, onAdd, onEdit, onDelete, onImport, onExport }) => {
+const MockList: React.FC<MockListProps> = ({ displayRows, mocks, unsyncedIds, onRestoreRemoved, onAdd, onEdit, onDelete, onImport, onExport }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportClick = () => {
@@ -63,6 +67,9 @@ const MockList: React.FC<MockListProps> = ({ mocks, unsyncedIds, onAdd, onEdit, 
     reader.readAsText(file);
   };
 
+  const rows: DisplayRow[] = (displayRows ?? (mocks || []).map(m => ({ kind: 'present' as const, mock: m })));
+  const presentCount = rows.filter(r => r.kind === 'present').length;
+
   return (
     <div className="bg-gray-800 rounded-lg shadow-lg flex flex-col h-full">
       <div className="p-4 border-b border-gray-700">
@@ -79,38 +86,52 @@ const MockList: React.FC<MockListProps> = ({ mocks, unsyncedIds, onAdd, onEdit, 
               Import
             </button>
             <input type="file" accept=".json" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
-            <button onClick={onExport} disabled={mocks.length === 0} className="flex-1 flex items-center justify-center px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded-md text-sm font-medium disabled:bg-gray-700 disabled:cursor-not-allowed disabled:text-gray-500">
+            <button onClick={onExport} disabled={presentCount === 0} className="flex-1 flex items-center justify-center px-3 py-2 bg-gray-600 hover:bg-gray-500 rounded-md text-sm font-medium disabled:bg-gray-700 disabled:cursor-not-allowed disabled:text-gray-500">
               <DownloadIcon className="w-5 h-5 mr-2" />
               Export
             </button>
         </div>
       </div>
-      <div className="flex-grow overflow-y-auto p-2">
-        {mocks.length === 0 ? (
+      <div className="flex-grow overflow-y-auto p-2 space-y-3">
+        {(presentCount === 0) ? (
           <div className="text-center text-gray-500 p-8">
             <p>No mocks configured yet.</p>
             <p>Click "New" to create one, or "Import" to load a file.</p>
           </div>
         ) : (
           <ul className="space-y-2">
-            {mocks.map(mock => {
-              const isUnsynced = !!unsyncedIds && unsyncedIds.has(mock.id);
-              const displayName = (mock.name && mock.name.trim().length > 0) ? mock.name : mock.matcher.path;
+            {rows.map(row => {
+              const mock = row.mock;
+              const isRemoved = row.kind === 'removed';
+              const isUnsynced = isRemoved || (!!unsyncedIds && unsyncedIds.has(mock.id));
+              const path = mock.matcher?.path || '';
+              const method = mock.matcher?.method || '';
+              const displayName = (mock.name && mock.name.trim().length > 0) ? mock.name : path || '(unnamed)';
               return (
-                <li key={mock.id} className={`rounded-md p-3 group ${isUnsynced ? 'bg-gray-700/60 border border-amber-500/40' : 'bg-gray-700/50'}`}>
-                  <div className="flex justify-between items-center">
-                    <div className="flex-1 overflow-hidden">
-                      <p className={`font-semibold truncate ${isUnsynced ? 'text-amber-300' : ''}`}>{displayName}</p>
+                <li key={`${row.kind}-${mock.id}`} className={`rounded-md p-3 group ${isRemoved ? 'bg-gray-700/40 border border-amber-500/30' : isUnsynced ? 'bg-gray-700/60 border border-amber-500/40' : 'bg-gray-700/50'}`}>
+                  <div className="grid grid-cols-[1fr_auto_auto] items-center gap-2">
+                    <div className="min-w-0 overflow-hidden">
+                      <p className={`font-semibold truncate ${isRemoved ? 'text-amber-300' : isUnsynced ? 'text-amber-300' : ''}`}>{displayName}</p>
                       <div className="flex items-center text-sm text-gray-400 font-mono mt-1">
-                        <span className={`font-bold w-16 ${getMethodColor(mock.matcher.method)}`}>{mock.matcher.method}</span>
-                        <span className="truncate">{mock.matcher.path}</span>
+                        <span className={`font-bold w-16 ${getMethodColor(method)}`}>{method || '-'}</span>
+                        <span className="truncate">{path || '-'}</span>
                       </div>
                     </div>
-                    <div className="flex items-center space-x-2">
-                      {isUnsynced && (
-                        <span className="text-[10px] uppercase tracking-wide text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-0.5 mr-1">unsynced</span>
+                    <div className="flex items-center justify-end">
+                      {isRemoved ? (
+                        <span className="text-[10px] uppercase tracking-wide text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-0.5">unsynced</span>
+                      ) : (
+                        isUnsynced && <span className="text-[10px] uppercase tracking-wide text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-0.5">unsynced</span>
                       )}
-                      <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    </div>
+                    {isRemoved ? (
+                      <div className="flex items-center space-x-2 justify-end">
+                        {onRestoreRemoved && (
+                          <button onClick={() => onRestoreRemoved(mock)} className="px-2 py-1 text-xs bg-amber-600 hover:bg-amber-500 rounded">Restore</button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center space-x-2 justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                         <button onClick={() => onEdit(mock)} className="p-1 text-gray-400 hover:text-white">
                           <PencilIcon className="w-5 h-5" />
                         </button>
@@ -118,7 +139,7 @@ const MockList: React.FC<MockListProps> = ({ mocks, unsyncedIds, onAdd, onEdit, 
                           <TrashIcon className="w-5 h-5" />
                         </button>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </li>
               );
