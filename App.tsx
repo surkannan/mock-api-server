@@ -497,13 +497,7 @@ const App: React.FC = () => {
               </div>
               <button onClick={reloadServerFromFile} disabled={!serverHealth} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">Reload from File</button>
               {/* Auto-sync removed */}
-              {/* Dev-only badge and Sync status text */}
-              <span
-                className="text-[10px] uppercase tracking-wide text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-0.5"
-                title="For development/testing only. Single instance, local browser state, optional on-disk mocks-config.json when persisted. Not for production use."
-              >
-                Dev/Testing only
-              </span>
+              {/* Sync status text */}
               {serverHealth && (
                 <span className="text-xs text-gray-400 ml-2">
                   {lastSyncedJson === stableStringifyMocks(mocks) ? 'In sync with server' : 'Unsynced changes'}
@@ -525,6 +519,15 @@ const App: React.FC = () => {
           onImport={handleImportMocks}
           onExport={handleExportMocks}
         />
+        <div className="px-2 pt-2 text-center text-xs text-gray-500 flex items-center justify-center gap-1">
+          <svg aria-hidden="true" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 text-gray-500">
+            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-5a1 1 0 100 2 1 1 0 000-2zM9 9a1 1 0 000 2h1v4a1 1 0 102 0V9a1 1 0 00-1-1H9z" clipRule="evenodd" />
+          </svg>
+          <span>
+            This tool is for development/testing only. Single instance with local browser state; persisting writes a local
+            <code className="mx-1">mocks-config.json</code> on the server.
+          </span>
+        </div>
       </main>
       <MockFormModal
         isOpen={isModalOpen}
