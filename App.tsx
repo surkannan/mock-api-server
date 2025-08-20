@@ -497,7 +497,13 @@ const App: React.FC = () => {
               </div>
               <button onClick={reloadServerFromFile} disabled={!serverHealth} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">Reload from File</button>
               {/* Auto-sync removed */}
-              {/* Sync status text */}
+              {/* Dev-only badge and Sync status text */}
+              <span
+                className="text-[10px] uppercase tracking-wide text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-0.5"
+                title="For development/testing only. Single instance, local browser state, optional on-disk mocks-config.json when persisted. Not for production use."
+              >
+                Dev/Testing only
+              </span>
               {serverHealth && (
                 <span className="text-xs text-gray-400 ml-2">
                   {lastSyncedJson === stableStringifyMocks(mocks) ? 'In sync with server' : 'Unsynced changes'}

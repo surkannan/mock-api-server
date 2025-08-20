@@ -48,6 +48,22 @@ This is the standard process for using the tool.
 
 ---
 
+## 2a. Development/Testing Only
+
+This tool is designed for development and testing workflows. It is not intended or hardened for production use.
+
+- **Single instance:** The mock server is a simple single-process service. There is no clustering, multi-tenancy, or high availability.
+- **Local persistence:**
+  - The UI stores editor state in your browser’s `localStorage` (e.g., the current mocks you are working on).
+  - When you choose "Sync" with persist, the server writes `mocks-config.json` on its filesystem. This assumes local, trusted dev environments.
+- **No concurrency controls:** Multiple users pointing at the same server may overwrite each other’s changes.
+- **Security:** Minimal security and auth. Do not expose this to untrusted networks.
+- **Data durability:** Files can be changed or deleted by other processes; there are no backups/versioning built-in.
+
+For CI or local testing, export/import the `mocks-config.json` file to track changes explicitly with version control.
+
+---
+
 ## 3. The Configuration Editor UI
 
 ### Creating a New Mock
