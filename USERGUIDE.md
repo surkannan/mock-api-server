@@ -119,3 +119,83 @@ The server exposes a few admin endpoints to simplify integration with the UI:
 -   `GET /__mocks` → Returns in-memory mocks.
 -   `PUT /__mocks?persist=true|false` → Replace in-memory mocks with the provided array; persist to file if `persist=true`.
 -   `POST /__reload` → Reload mocks from the config file on disk (if present).
+
+---
+
+## 7. Response Templating
+
+Mock response headers and body support templating. Placeholders are resolved from the incoming request and runtime values.
+
+### Available placeholders
+- **Request**
+  - `{{method}}`, `{{path}}`, `{{url}}`, `{{host}}`
+- **Headers** (lowercased keys)
+  - `{{headers.authorization}}`, `{{headers.content-type}}`, ...
+- **Query params**
+  - `{{query.page}}`, `{{query.userId}}`, ...
+- **Body**
+  - `{{body}}` (raw string)
+  - `{{bodyJson.userId}}`, `{{bodyJson.profile.name}}` (parsed JSON; blank if parse fails)
+- **Time/IDs**
+  - `{{isoNow}}`, `{{epochMs}}`, `{{uuid}}`
+
+If a key is missing or cannot be parsed, it renders as an empty string.
+
+### Examples
+- Header value: `X-Request-Id: {{uuid}}`
+- JSON body (enter as a string in the UI):
+```json
+{
+  "method": "{{method}}",
+  "path": "{{path}}",
+  "token": "{{headers.authorization}}",
+  "page": "{{query.page}}",
+  "receivedAt": "{{isoNow}}",
+  "echo": {{body}}
+}
+```
+
+---
+
+## 8. JavaScript Expressions in Templates
+
+You can compute values inline using a sandboxed JavaScript expression.
+
+### Syntax
+- `{{= <expression>}}`
+- `{{js: <expression>}}`
+
+The expression runs with access to the same context as placeholders plus `helpers`.
+
+### Context available in expressions
+- `method`, `path`, `url`, `host`
+- `headers` (object with lowercased keys)
+- `query` (object of query params)
+- `body` (raw string)
+- `bodyJson` (parsed JSON object or null)
+- `isoNow`, `epochMs`, `uuid`
+- `helpers` (see below)
+
+### Helpers
+- `helpers.upper(s)` / `helpers.lower(s)`
+- `helpers.base64(s)`
+- `helpers.json(o)` — JSON stringify
+- `helpers.parseJson(s)` — safe JSON parse (returns null on error)
+- `helpers.randomInt(min, max)` — inclusive integer
+
+### Examples
+- Header: `X-User: {{= (bodyJson && bodyJson.user && bodyJson.user.name) || 'anon' }}`
+- JSON body:
+```json
+{
+  "id": "{{uuid}}",
+  "echo": {{= helpers.json(bodyJson) }},
+  "token": "{{helpers.base64(headers.authorization)}}",
+  "amountDoubled": {{= (Number(bodyJson?.amount) || 0) * 2 }},
+  "at": "{{isoNow}}"
+}
+```
+
+### Notes
+- Expressions are sandboxed with a short timeout (unsafe globals like `require` are not available).
+- Ensure final rendered bodies are valid JSON when your client expects JSON. Prefer `helpers.json(...)` when embedding dynamic objects.

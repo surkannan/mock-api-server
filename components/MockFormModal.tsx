@@ -176,6 +176,36 @@ const MockFormModal: React.FC<MockFormModalProps> = ({ isOpen, onClose, onSave, 
                   onChange={(e) => setResponse({ body: e.target.value })}
                   className="w-full h-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
+                {/* Cheatsheet */}
+                <details className="mt-3 bg-gray-800/60 border border-gray-700 rounded-md">
+                  <summary className="px-3 py-2 text-sm font-medium cursor-pointer select-none">Templating Cheatsheet</summary>
+                  <div className="px-3 py-3 text-xs text-gray-300 space-y-2">
+                    <div>
+                      <div className="font-semibold text-gray-200 mb-1">Placeholders</div>
+                      <ul className="list-disc list-inside space-y-1">
+                        <li>Request: <code className="bg-gray-900 px-1 rounded">{`{{method}}`}</code>, <code className="bg-gray-900 px-1 rounded">{`{{path}}`}</code>, <code className="bg-gray-900 px-1 rounded">{`{{url}}`}</code></li>
+                        <li>Headers: <code className="bg-gray-900 px-1 rounded">{`{{headers.authorization}}`}</code></li>
+                        <li>Query: <code className="bg-gray-900 px-1 rounded">{`{{query.page}}`}</code></li>
+                        <li>Body: <code className="bg-gray-900 px-1 rounded">{`{{body}}`}</code>, JSON fields: <code className="bg-gray-900 px-1 rounded">{`{{bodyJson.userId}}`}</code></li>
+                        <li>Time/IDs: <code className="bg-gray-900 px-1 rounded">{`{{isoNow}}`}</code>, <code className="bg-gray-900 px-1 rounded">{`{{epochMs}}`}</code>, <code className="bg-gray-900 px-1 rounded">{`{{uuid}}`}</code></li>
+                      </ul>
+                    </div>
+                    <div>
+                      <div className="font-semibold text-gray-200 mb-1">JS Expressions</div>
+                      <p>Use <code className="bg-gray-900 px-1 rounded">{`{{= <expr>}}`}</code> or <code className="bg-gray-900 px-1 rounded">{`{{js: <expr>}}`}</code>. Context: <code className="bg-gray-900 px-1 rounded">method</code>, <code className="bg-gray-900 px-1 rounded">path</code>, <code className="bg-gray-900 px-1 rounded">headers</code>, <code className="bg-gray-900 px-1 rounded">query</code>, <code className="bg-gray-900 px-1 rounded">body</code>, <code className="bg-gray-900 px-1 rounded">bodyJson</code>, <code className="bg-gray-900 px-1 rounded">isoNow</code>, <code className="bg-gray-900 px-1 rounded">epochMs</code>, <code className="bg-gray-900 px-1 rounded">uuid</code>.</p>
+                      <p>Helpers: <code className="bg-gray-900 px-1 rounded">helpers.upper(s)</code>, <code className="bg-gray-900 px-1 rounded">helpers.lower(s)</code>, <code className="bg-gray-900 px-1 rounded">helpers.base64(s)</code>, <code className="bg-gray-900 px-1 rounded">helpers.json(o)</code>, <code className="bg-gray-900 px-1 rounded">helpers.parseJson(s)</code>, <code className="bg-gray-900 px-1 rounded">helpers.randomInt(min,max)</code>.</p>
+                      <div className="mt-2 bg-gray-900 border border-gray-700 rounded p-2 font-mono text-[11px] leading-5 overflow-x-auto">
+                        {`{
+  "id": "{{uuid}}",
+  "user": "{{= (bodyJson && bodyJson.user && bodyJson.user.name) || 'anon' }}",
+  "echo": {{= helpers.json(bodyJson) }},
+  "token": "{{helpers.base64(headers.authorization)}}",
+  "at": "{{isoNow}}"
+}`}
+                      </div>
+                    </div>
+                  </div>
+                </details>
               </div>
             </div>
           </div>

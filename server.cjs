@@ -2,6 +2,8 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { randomUUID } = require('crypto');
+const vm = require('vm');
 
 const PORT = 4000;
 const CONFIG_FILE = 'mocks-config.json';
@@ -146,6 +148,87 @@ const findMatchingMock = (request, mocks) => {
 
 
 // --- Server Implementation ---
+
+// Simple template renderer for placeholders like {{method}}, {{query.foo}}, {{headers.authorization}}, {{bodyJson.userId}}, {{isoNow}}, {{epochMs}}, {{uuid}}
+const deepGet = (obj, pathStr) => {
+  if (!obj) return undefined;
+  const parts = String(pathStr).split('.');
+  let cur = obj;
+  for (const p of parts) {
+    if (cur && Object.prototype.hasOwnProperty.call(cur, p)) cur = cur[p];
+    else return undefined;
+  }
+  return cur;
+};
+
+const helpers = {
+  upper: (s) => String(s ?? '').toUpperCase(),
+  lower: (s) => String(s ?? '').toLowerCase(),
+  base64: (s) => Buffer.from(String(s ?? ''), 'utf8').toString('base64'),
+  json: (o) => {
+    try { return JSON.stringify(o); } catch { return ''; }
+  },
+  parseJson: (s) => {
+    try { return JSON.parse(String(s ?? '')); } catch { return null; }
+  },
+  randomInt: (min = 0, max = 1) => {
+    min = Math.floor(min); max = Math.floor(max);
+    if (max < min) [min, max] = [max, min];
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  },
+};
+
+const renderTemplate = (value, ctx) => {
+  if (typeof value !== 'string' || !value.includes('{{')) return value;
+  return value.replace(/\{\{\s*([^}]+)\s*\}\}/g, (m, keyPath) => {
+    const k = String(keyPath).trim();
+    if (k === 'uuid') return randomUUID();
+    // JS expression: {{= expr}} or {{js: expr}}
+    if (k.startsWith('=') || k.startsWith('js:')) {
+      const expr = k.startsWith('js:') ? k.slice(3) : k.slice(1);
+      try {
+        const sandbox = {
+          ...ctx,
+          helpers,
+          Math,
+          Date,
+          JSON,
+        };
+        // Run with a short timeout and isolated context
+        const script = new vm.Script(`(function(){ return (${expr}); })()`);
+        const result = script.runInNewContext(sandbox, { timeout: 50 });
+        return result == null ? '' : String(result);
+      } catch (e) {
+        return '';
+      }
+    }
+    const val = deepGet(ctx, k);
+    return val == null ? '' : String(val);
+  });
+};
+
+const buildTemplateContext = (req, urlObj, rawBody) => {
+  // headers as lowercased map
+  const headers = Object.fromEntries(
+    Object.entries(req.headers).map(([k, v]) => [k.toLowerCase(), Array.isArray(v) ? v.join(', ') : (v ?? '')])
+  );
+  const query = Object.fromEntries(urlObj.searchParams.entries());
+  let bodyJson = null;
+  try { bodyJson = rawBody ? JSON.parse(rawBody) : null; } catch {}
+  return {
+    method: req.method,
+    path: urlObj.pathname,
+    url: req.url,
+    host: headers['host'] || 'localhost',
+    query,
+    headers,
+    body: rawBody || '',
+    bodyJson,
+    isoNow: new Date().toISOString(),
+    epochMs: Date.now(),
+    uuid: randomUUID(),
+  };
+};
 
 loadMocksFromFile();
 
@@ -311,6 +394,7 @@ const server = http.createServer((req, res) => {
       body: body,
     };
     const reqHeadersObj = Object.fromEntries(Object.entries(req.headers).map(([key, value]) => [key, Array.isArray(value) ? value.join(', ') : (value ?? '')]));
+    const templateCtx = buildTemplateContext(req, url, body);
 
     const matchedMock = findMatchingMock(liveRequest, currentMocks);
     const timestamp = new Date().toLocaleTimeString();
@@ -327,10 +411,14 @@ const server = http.createServer((req, res) => {
         if (matchedMock.name) res.setHeader('X-Mock-Name', matchedMock.name);
         if (matchedMock.id) res.setHeader('X-Mock-Id', matchedMock.id);
         mockResponse.headers.forEach((h) => {
-          if (h && h.key) res.setHeader(h.key, h.value);
+          if (h && h.key) {
+            const renderedVal = renderTemplate(h.value, templateCtx);
+            res.setHeader(h.key, renderedVal);
+          }
         });
         res.writeHead(mockResponse.status);
-        res.end(mockResponse.body);
+        const renderedBody = typeof mockResponse.body === 'string' ? renderTemplate(mockResponse.body, templateCtx) : '';
+        res.end(renderedBody);
         const durationMs = hrtimeMs(startHr).toFixed(1);
         const responseHeaders = res.getHeaders();
         jlog('info', 'request.matched', {
