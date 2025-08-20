@@ -24,6 +24,40 @@ const App: React.FC = () => {
     try { return localStorage.getItem('bootstrappedFromServer') === 'true'; } catch { return false; }
   });
 
+  // Stable stringify helpers to avoid false diffs due to order/key differences
+  const sortKV = <T extends { key: string; value: string }>(arr: T[]): T[] =>
+    arr.slice().sort((a, b) => (a.key || '').localeCompare(b.key || '') || (a.value || '').localeCompare(b.value || ''));
+
+  const normalizeMock = (m: Mock): Mock => ({
+    ...m,
+    matcher: {
+      ...m.matcher,
+      headers: sortKV((m.matcher?.headers || []).filter(h => h && h.key !== undefined)),
+      queryParams: sortKV((m.matcher?.queryParams || []).filter(q => q && q.key !== undefined)),
+    },
+    response: {
+      ...m.response,
+      headers: sortKV((m.response?.headers || []).filter(h => h && h.key !== undefined)),
+    },
+  });
+
+  const normalizeValue = (v: any): any => {
+    if (Array.isArray(v)) return v.map(normalizeValue);
+    if (v && typeof v === 'object') {
+      const keys = Object.keys(v).sort();
+      const out: any = {};
+      for (const k of keys) out[k] = normalizeValue(v[k]);
+      return out;
+    }
+    return v;
+  };
+  const stableStringifyMocks = (arr: Mock[]) => {
+    const byIdDesc = arr.slice().sort((a, b) => parseInt(b.id) - parseInt(a.id));
+    const pre = byIdDesc.map(normalizeMock);
+    const normalized = pre.map((m) => normalizeValue(m));
+    return JSON.stringify(normalized);
+  };
+
   // Tabs switcher (button group only)
   const Tabs = (
     <div className="inline-flex rounded-md overflow-hidden border border-gray-700">
@@ -45,6 +79,8 @@ const App: React.FC = () => {
   const updateMocks = (newMocks: Mock[]) => {
       const sortedMocks = newMocks.sort((a, b) => parseInt(b.id) - parseInt(a.id));
       setMocks(sortedMocks);
+      // persist UI state locally to survive reloads
+      try { localStorage.setItem('uiMocks', JSON.stringify(sortedMocks)); } catch {}
       if (autoSync && serverHealth?.ok) {
         // fire-and-forget sync without persistence using latest payload
         syncToServer(false, sortedMocks).catch(() => {});
@@ -119,7 +155,9 @@ const App: React.FC = () => {
       const serverMocks: Mock[] = await res.json();
       const sorted = (Array.isArray(serverMocks) ? serverMocks : []).slice().sort((a, b) => parseInt(b.id) - parseInt(a.id));
       updateMocks(sorted);
-      setLastSyncedJson(JSON.stringify(sorted));
+      const synced = stableStringifyMocks(sorted);
+      setLastSyncedJson(synced);
+      try { localStorage.setItem('lastSyncedJson', synced); } catch {}
     } catch (e) {
       alert('Could not load from server. Check the server URL and that it is running.');
     }
@@ -135,7 +173,9 @@ const App: React.FC = () => {
       });
       if (!res.ok) throw new Error('Failed to sync mocks');
       await fetchHealth();
-      setLastSyncedJson(JSON.stringify(payload ?? mocks));
+      const synced = stableStringifyMocks(payload ?? mocks);
+      setLastSyncedJson(synced);
+      try { localStorage.setItem('lastSyncedJson', synced); } catch {}
     } catch (e) {
       alert('Sync failed. Ensure the server is running and CORS is allowed.');
     } finally {
@@ -158,6 +198,22 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Restore local UI mocks and sync status on load
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('uiMocks');
+      if (raw) {
+        const arr = JSON.parse(raw) as Mock[];
+        if (Array.isArray(arr)) {
+          const sorted = arr.slice().sort((a, b) => parseInt(b.id) - parseInt(a.id));
+          setMocks(sorted);
+        }
+      }
+      const last = localStorage.getItem('lastSyncedJson');
+      if (last) setLastSyncedJson(last);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     try { localStorage.setItem('serverBase', serverBase); } catch {}
   }, [serverBase]);
@@ -165,12 +221,17 @@ const App: React.FC = () => {
   useEffect(() => {
     // Attempt to refresh health when server base changes
     fetchHealth();
+    // Reset bootstrap flag when target server changes (so we can bootstrap for a different server)
+    try { localStorage.removeItem('bootstrappedFromServer'); } catch {}
+    setBootstrapped(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverBase]);
 
-  // Auto-bootstrap mocks from server on first load (once per browser)
+  // Auto-bootstrap mocks from server on first load (once per serverBase) only if there are no locally saved mocks
   useEffect(() => {
-    if (!bootstrapped && serverHealth?.ok && mocks.length === 0) {
+    const serverHasMocks = !!(serverHealth && typeof serverHealth.mocksCount === 'number' && serverHealth.mocksCount > 0);
+    const hasLocalMocks = (() => { try { return !!localStorage.getItem('uiMocks'); } catch { return false; } })();
+    if (!bootstrapped && serverHealth?.ok && serverHasMocks && mocks.length === 0 && !hasLocalMocks) {
       loadFromServer()
         .then(() => {
           try { localStorage.setItem('bootstrappedFromServer', 'true'); } catch {}
@@ -220,7 +281,6 @@ const App: React.FC = () => {
                 <li>Option A: Click <strong className="font-semibold text-gray-100">Export</strong> to download <code className="bg-gray-700 px-1 rounded">mocks-config.json</code>.</li>
                 <li>Option B: Use <strong>Sync to Server</strong> below to push mocks directly without exporting.</li>
                 <li>Dev: <code className="bg-gray-900 border border-gray-600 text-green-400 px-2 py-1 rounded-md block mt-1">npm run dev</code> starts both this UI and the server.</li>
-                <li>Manual: Run the server: <code className="bg-gray-900 border border-gray-600 text-green-400 px-2 py-1 rounded-md block mt-1">node server.cjs</code> (config file optional)</li>
                 <li>Point your applications to <code className="bg-gray-700 px-1 rounded">http://localhost:4000</code>.</li>
             </ol>
         </div>
@@ -250,8 +310,8 @@ const App: React.FC = () => {
               <button onClick={loadFromServer} disabled={!serverHealth} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">Load from Server</button>
               {/* in-sync computation */}
               {/* disabled when in-sync, syncing, or empty */}
-              <button onClick={() => syncToServer(false)} disabled={!serverHealth || syncing || mocks.length===0 || (serverHealth && lastSyncedJson === JSON.stringify(mocks))} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync to Server'}</button>
-              <button onClick={() => syncToServer(true)} disabled={!serverHealth || syncing || mocks.length===0 || (serverHealth && lastSyncedJson === JSON.stringify(mocks))} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync & Persist'}</button>
+              <button onClick={() => syncToServer(false)} disabled={!serverHealth || syncing || mocks.length===0 || (serverHealth && lastSyncedJson === stableStringifyMocks(mocks))} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync to Server'}</button>
+              <button onClick={() => syncToServer(true)} disabled={!serverHealth || syncing || mocks.length===0 || (serverHealth && lastSyncedJson === stableStringifyMocks(mocks))} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync & Persist'}</button>
               <button onClick={reloadServerFromFile} disabled={!serverHealth} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">Reload from File</button>
               <label className="flex items-center gap-2 text-sm ml-2">
                 <input type="checkbox" checked={autoSync} onChange={(e) => setAutoSync(e.target.checked)} />
@@ -260,7 +320,7 @@ const App: React.FC = () => {
               {/* Sync status text */}
               {serverHealth && (
                 <span className="text-xs text-gray-400 ml-2">
-                  {lastSyncedJson === JSON.stringify(mocks) ? 'In sync with server' : 'Unsynced changes'}
+                  {lastSyncedJson === stableStringifyMocks(mocks) ? 'In sync with server' : 'Unsynced changes'}
                 </span>
               )}
             </div>
