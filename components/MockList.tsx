@@ -8,6 +8,7 @@ import DownloadIcon from './icons/DownloadIcon';
 
 interface MockListProps {
   mocks: Mock[];
+  unsyncedIds?: Set<string>;
   onAdd: () => void;
   onEdit: (mock: Mock) => void;
   onDelete: (id: string) => void;
@@ -26,7 +27,7 @@ const getMethodColor = (method: string) => {
   }
 };
 
-const MockList: React.FC<MockListProps> = ({ mocks, onAdd, onEdit, onDelete, onImport, onExport }) => {
+const MockList: React.FC<MockListProps> = ({ mocks, unsyncedIds, onAdd, onEdit, onDelete, onImport, onExport }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleImportClick = () => {
@@ -92,27 +93,36 @@ const MockList: React.FC<MockListProps> = ({ mocks, onAdd, onEdit, onDelete, onI
           </div>
         ) : (
           <ul className="space-y-2">
-            {mocks.map(mock => (
-              <li key={mock.id} className="bg-gray-700/50 rounded-md p-3 group">
-                <div className="flex justify-between items-center">
-                  <div className="flex-1 overflow-hidden">
-                    <p className="font-semibold truncate">{mock.name}</p>
-                    <div className="flex items-center text-sm text-gray-400 font-mono mt-1">
-                      <span className={`font-bold w-16 ${getMethodColor(mock.matcher.method)}`}>{mock.matcher.method}</span>
-                      <span className="truncate">{mock.matcher.path}</span>
+            {mocks.map(mock => {
+              const isUnsynced = !!unsyncedIds && unsyncedIds.has(mock.id);
+              const displayName = (mock.name && mock.name.trim().length > 0) ? mock.name : mock.matcher.path;
+              return (
+                <li key={mock.id} className={`rounded-md p-3 group ${isUnsynced ? 'bg-gray-700/60 border border-amber-500/40' : 'bg-gray-700/50'}`}>
+                  <div className="flex justify-between items-center">
+                    <div className="flex-1 overflow-hidden">
+                      <p className={`font-semibold truncate ${isUnsynced ? 'text-amber-300' : ''}`}>{displayName}</p>
+                      <div className="flex items-center text-sm text-gray-400 font-mono mt-1">
+                        <span className={`font-bold w-16 ${getMethodColor(mock.matcher.method)}`}>{mock.matcher.method}</span>
+                        <span className="truncate">{mock.matcher.path}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      {isUnsynced && (
+                        <span className="text-[10px] uppercase tracking-wide text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-0.5 mr-1">unsynced</span>
+                      )}
+                      <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={() => onEdit(mock)} className="p-1 text-gray-400 hover:text-white">
+                          <PencilIcon className="w-5 h-5" />
+                        </button>
+                        <button onClick={() => onDelete(mock.id)} className="p-1 text-gray-400 hover:text-red-400">
+                          <TrashIcon className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => onEdit(mock)} className="p-1 text-gray-400 hover:text-white">
-                      <PencilIcon className="w-5 h-5" />
-                    </button>
-                    <button onClick={() => onDelete(mock.id)} className="p-1 text-gray-400 hover:text-red-400">
-                      <TrashIcon className="w-5 h-5" />
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>

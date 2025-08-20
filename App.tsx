@@ -9,7 +9,6 @@ const App: React.FC = () => {
   const [editingMock, setEditingMock] = useState<Mock | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [serverHealth, setServerHealth] = useState<null | { ok: boolean; port: number; configPath: string; hasConfigFile: boolean; mocksCount: number }>(null);
-  const [autoSync, setAutoSync] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedJson, setLastSyncedJson] = useState<string | null>(null);
   const [serverBase, setServerBase] = useState<string>(() => {
@@ -23,6 +22,7 @@ const App: React.FC = () => {
   const [bootstrapped, setBootstrapped] = useState<boolean>(() => {
     try { return localStorage.getItem('bootstrappedFromServer') === 'true'; } catch { return false; }
   });
+  const [syncMenuOpen, setSyncMenuOpen] = useState(false);
 
   // Stable stringify helpers to avoid false diffs due to order/key differences
   const sortKV = <T extends { key: string; value: string }>(arr: T[]): T[] =>
@@ -81,10 +81,6 @@ const App: React.FC = () => {
       setMocks(sortedMocks);
       // persist UI state locally to survive reloads
       try { localStorage.setItem('uiMocks', JSON.stringify(sortedMocks)); } catch {}
-      if (autoSync && serverHealth?.ok) {
-        // fire-and-forget sync without persistence using latest payload
-        syncToServer(false, sortedMocks).catch(() => {});
-      }
   };
   
   const handleAddMock = () => {
@@ -242,6 +238,33 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverHealth, bootstrapped, mocks.length]);
 
+  // Derived sync state for buttons
+  const inSync = Boolean(serverHealth && lastSyncedJson === stableStringifyMocks(mocks));
+  const canSync = Boolean(serverHealth && !syncing && mocks.length > 0 && !inSync);
+
+  // Derive unsynced mock ids by deep comparing normalized mocks vs lastSyncedJson snapshot
+  const unsyncedIds: Set<string> = (() => {
+    try {
+      if (!lastSyncedJson) return new Set<string>();
+      const parsed = JSON.parse(lastSyncedJson) as Mock[] | any[];
+      if (!Array.isArray(parsed)) return new Set<string>();
+      // parsed is normalized and sorted when we stored it
+      const byId = new Map<string, any>();
+      for (const m of parsed as any[]) {
+        if (m && m.id) byId.set(String(m.id), m);
+      }
+      const set = new Set<string>();
+      for (const cur of mocks) {
+        const curNorm = normalizeValue(normalizeMock(cur));
+        const prev = byId.get(String(cur.id));
+        if (!prev || JSON.stringify(curNorm) !== JSON.stringify(prev)) set.add(cur.id);
+      }
+      return set;
+    } catch {
+      return new Set<string>();
+    }
+  })();
+
   // Full-screen Logs view (no margins) when Logs tab is active
   if (activeTab === 'logs') {
     return (
@@ -308,15 +331,39 @@ const App: React.FC = () => {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button onClick={loadFromServer} disabled={!serverHealth} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">Load from Server</button>
-              {/* in-sync computation */}
-              {/* disabled when in-sync, syncing, or empty */}
-              <button onClick={() => syncToServer(false)} disabled={!serverHealth || syncing || mocks.length===0 || (serverHealth && lastSyncedJson === stableStringifyMocks(mocks))} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync to Server'}</button>
-              <button onClick={() => syncToServer(true)} disabled={!serverHealth || syncing || mocks.length===0 || (serverHealth && lastSyncedJson === stableStringifyMocks(mocks))} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">{syncing ? 'Syncing...' : 'Sync & Persist'}</button>
+              {/* Sync split button with dropdown */}
+              <div className="relative inline-flex" onBlur={() => setTimeout(() => setSyncMenuOpen(false), 100)}>
+                <button
+                  onClick={() => syncToServer(true)}
+                  disabled={!canSync}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-l-md text-sm disabled:bg-gray-700 disabled:text-gray-500"
+                  title="Sync & Persist"
+                >
+                  {syncing ? 'Syncing…' : 'Sync'}
+                </button>
+                <button
+                  onClick={() => { if (canSync) setSyncMenuOpen(v => !v); }}
+                  disabled={!canSync}
+                  className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-r-md text-sm border-l border-indigo-500 disabled:bg-gray-700 disabled:text-gray-500"
+                  aria-haspopup="menu"
+                  aria-expanded={syncMenuOpen}
+                  title="More sync options"
+                >
+                  ▾
+                </button>
+                {syncMenuOpen && (
+                  <div className="absolute right-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-md shadow-lg z-10">
+                    <button
+                      onClick={() => { setSyncMenuOpen(false); syncToServer(false); }}
+                      className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-700"
+                    >
+                      Sync (memory only)
+                    </button>
+                  </div>
+                )}
+              </div>
               <button onClick={reloadServerFromFile} disabled={!serverHealth} className="px-3 py-1.5 bg-gray-600 hover:bg-gray-500 rounded-md text-sm disabled:bg-gray-700 disabled:text-gray-500">Reload from File</button>
-              <label className="flex items-center gap-2 text-sm ml-2">
-                <input type="checkbox" checked={autoSync} onChange={(e) => setAutoSync(e.target.checked)} />
-                Auto-sync
-              </label>
+              {/* Auto-sync removed */}
               {/* Sync status text */}
               {serverHealth && (
                 <span className="text-xs text-gray-400 ml-2">
@@ -331,6 +378,7 @@ const App: React.FC = () => {
       <main className={`w-full max-w-4xl flex-grow` }>
         <MockList
           mocks={mocks}
+          unsyncedIds={unsyncedIds}
           onAdd={handleAddMock}
           onEdit={handleEditMock}
           onDelete={handleDeleteMock}

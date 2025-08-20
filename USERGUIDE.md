@@ -41,7 +41,8 @@ This is the standard process for using the tool.
     ```
     This runs both the UI (Vite) and the mock server together. Open the UI and configure your mocks.
 2.  **Choose how to apply mocks:**
-    -   **Option A – Sync to Server:** Use the UI controls to "Sync to Server" (pushes mocks into memory) or "Sync & Persist" (also writes to the config file on disk on the server).
+    -   **Option A – Sync:** Use the UI "Sync" button to push mocks to the running server and persist them to its config file on disk.
+        -   Use the dropdown ▾ next to Sync to choose **Sync (memory only)** if you don't want to persist.
     -   **Option B – Export File:** Click "Export" to download `mocks-config.json` and place it next to `server.cjs`. Then either run `npm run dev:server` or `node server.cjs --config mocks-config.json`.
 3.  **Connect:** The server is available at `http://localhost:4000`. Point your applications to this address. You can reload the server from file via the UI or `POST /__reload`.
 
@@ -72,8 +73,8 @@ When a request is matched, the server sends this predefined response:
 ### Importing, Exporting, and Syncing
 -   **Export:** Download `mocks-config.json` that you can feed the server.
 -   **Import:** Load a `mocks-config.json` back into the UI (overwrites current state).
--   **Sync to Server:** Push current mocks directly into the running server without writing a file.
--   **Sync & Persist:** Push mocks and ask the server to write `mocks-config.json` for you.
+-   **Sync:** Push current mocks to the running server and persist to its config file.
+-   **More options ▾:** Choose "Sync (memory only)" to push without persisting.
 
 ---
 
